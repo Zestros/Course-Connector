@@ -3,6 +3,9 @@
 !.env.example
 __pycache__/
 .DS_Store
+.codex
+.env.example
+AGENTS.md
 
 # Local/generated project data.
 data/raw-courses/
