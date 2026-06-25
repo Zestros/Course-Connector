@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+.DS_Store
+
+# Local/generated project data.
+data/raw-courses/
+data/normalized/
+data/comparison/
+local_notes/
