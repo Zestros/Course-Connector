@@ -1,0 +1,107 @@
+{
+  "schema_version": "course-connector.normalized.v0.1",
+  "course": {
+    "id": "COURSE_B",
+    "title": "Продвинутый курс"
+  },
+  "units": [
+    {
+      "unit_id": "COURSE_B:s01",
+      "title": "Применение модели",
+      "skills": [
+        {
+          "text": "применение базовой модели",
+          "normalized_text": "применение базовой модели",
+          "evidence": [
+            {
+              "source_type": "section_summary",
+              "path": "sections/01/section.raw.json",
+              "heading": "Навыки"
+            }
+          ]
+        }
+      ],
+      "competencies": [
+        {
+          "text": "применение базовой модели в задаче",
+          "normalized_text": "применение базовой модели в задаче",
+          "evidence": [
+            {
+              "source_type": "learning_material",
+              "path": "sections/01/modules/01-page/module.raw.json",
+              "heading": "Компетенции",
+              "module_id": 11,
+              "module_type": "page"
+            }
+          ]
+        }
+      ],
+      "learning_outcomes": [],
+      "assessment_methods": [],
+      "success_criteria": [
+        {
+          "text": "модель применена в задаче",
+          "normalized_text": "модель применена в задаче",
+          "evidence": [
+            {
+              "source_type": "assessment_quiz",
+              "path": "sections/01/modules/03-quiz/module.raw.json",
+              "heading": "Критерии успешного выполнения",
+              "module_id": 13,
+              "module_type": "quiz"
+            }
+          ]
+        }
+      ],
+      "assessment_tasks": [
+        {
+          "module_id": 12,
+          "title": "Практика",
+          "moodle_type": "assignment",
+          "declared_methods": ["практическое задание"],
+          "task_text": "Применить базовую модель в новой задаче.",
+          "criteria": ["модель применена в задаче"],
+          "evidence": [
+            {
+              "source_type": "practice_assignment",
+              "path": "sections/01/modules/02-assign/module.raw.json",
+              "module_id": 12,
+              "module_type": "assign"
+            }
+          ]
+        }
+      ],
+      "competency_coverage": [
+        {
+          "competency": "применение базовой модели в задаче",
+          "normalized_text": "применение базовой модели в задаче",
+          "status": "strong",
+          "support_score": 1.0,
+          "support": {
+            "declared": true,
+            "taught": true,
+            "practiced": true,
+            "assessed": true,
+            "criteria": true
+          },
+          "review_required": false,
+          "evidence": [
+            {
+              "source_type": "learning_material",
+              "path": "sections/01/modules/01-page/module.raw.json",
+              "heading": "Компетенции",
+              "module_id": 11,
+              "module_type": "page"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "course_signals": {
+    "skills": [],
+    "competencies": [],
+    "assessment_methods": [],
+    "assessment_types": {}
+  }
+}

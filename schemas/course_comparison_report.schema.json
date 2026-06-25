@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://course-connector.local/schemas/course_comparison_report.schema.json",
+  "title": "Course comparison report",
+  "type": "object",
+  "required": ["schema_version", "created_at", "courses", "summary", "findings"],
+  "properties": {
+    "schema_version": {
+      "const": "course-connector.comparison-report.v0.1"
+    },
+    "created_at": {"type": "string"},
+    "courses": {
+      "type": "object",
+      "required": ["course_a", "course_b"],
+      "properties": {
+        "course_a": {"type": "object"},
+        "course_b": {"type": "object"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["reinforcement", "duplication", "internal_gap", "course_break", "uncertain"],
+      "properties": {
+        "reinforcement": {"type": "integer", "minimum": 0},
+        "duplication": {"type": "integer", "minimum": 0},
+        "internal_gap": {"type": "integer", "minimum": 0},
+        "course_break": {"type": "integer", "minimum": 0},
+        "uncertain": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "object",
+      "required": ["reinforcement", "duplication", "internal_gap", "course_break", "uncertain"],
+      "properties": {
+        "reinforcement": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "duplication": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "internal_gap": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "course_break": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "uncertain": {"type": "array", "items": {"$ref": "#/$defs/finding"}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "relation_type",
+        "confidence",
+        "rationale",
+        "evidence_refs",
+        "review_required"
+      ],
+      "properties": {
+        "candidate_id": {"type": "string"},
+        "relation_type": {
+          "enum": ["reinforcement", "duplication", "internal_gap", "course_break", "uncertain"]
+        },
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "rationale": {"type": "string"},
+        "evidence_refs": {"type": "array", "items": {"type": "object"}, "minItems": 1},
+        "review_required": {"type": "boolean"},
+        "llm_model": {"type": ["string", "null"]},
+        "courses": {"type": "object"},
+        "payload_summary": {"type": "object"}
+      },
+      "additionalProperties": true
+    }
+  }
+}

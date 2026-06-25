@@ -1,0 +1,107 @@
+{
+  "schema_version": "course-connector.normalized.v0.1",
+  "course": {
+    "id": "COURSE_A",
+    "title": "Вводный курс"
+  },
+  "units": [
+    {
+      "unit_id": "COURSE_A:s01",
+      "title": "Основы модели",
+      "skills": [
+        {
+          "text": "объяснение базовой модели",
+          "normalized_text": "объяснение базовой модели",
+          "evidence": [
+            {
+              "source_type": "section_summary",
+              "path": "sections/01/section.raw.json",
+              "heading": "Навыки"
+            }
+          ]
+        }
+      ],
+      "competencies": [
+        {
+          "text": "понимание базовой модели",
+          "normalized_text": "понимание базовой модели",
+          "evidence": [
+            {
+              "source_type": "learning_material",
+              "path": "sections/01/modules/01-page/module.raw.json",
+              "heading": "Компетенции",
+              "module_id": 1,
+              "module_type": "page"
+            }
+          ]
+        }
+      ],
+      "learning_outcomes": [],
+      "assessment_methods": [],
+      "success_criteria": [
+        {
+          "text": "модель объяснена на примере",
+          "normalized_text": "модель объяснена на примере",
+          "evidence": [
+            {
+              "source_type": "assessment_quiz",
+              "path": "sections/01/modules/03-quiz/module.raw.json",
+              "heading": "Критерии успешного выполнения",
+              "module_id": 3,
+              "module_type": "quiz"
+            }
+          ]
+        }
+      ],
+      "assessment_tasks": [
+        {
+          "module_id": 2,
+          "title": "Практика",
+          "moodle_type": "assignment",
+          "declared_methods": ["короткое объяснение"],
+          "task_text": "Объяснить базовую модель на примере.",
+          "criteria": ["модель объяснена на примере"],
+          "evidence": [
+            {
+              "source_type": "practice_assignment",
+              "path": "sections/01/modules/02-assign/module.raw.json",
+              "module_id": 2,
+              "module_type": "assign"
+            }
+          ]
+        }
+      ],
+      "competency_coverage": [
+        {
+          "competency": "понимание базовой модели",
+          "normalized_text": "понимание базовой модели",
+          "status": "strong",
+          "support_score": 1.0,
+          "support": {
+            "declared": true,
+            "taught": true,
+            "practiced": true,
+            "assessed": true,
+            "criteria": true
+          },
+          "review_required": false,
+          "evidence": [
+            {
+              "source_type": "learning_material",
+              "path": "sections/01/modules/01-page/module.raw.json",
+              "heading": "Компетенции",
+              "module_id": 1,
+              "module_type": "page"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "course_signals": {
+    "skills": [],
+    "competencies": [],
+    "assessment_methods": [],
+    "assessment_types": {}
+  }
+}

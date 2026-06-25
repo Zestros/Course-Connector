@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://course-connector.local/schemas/course_comparison_candidates.schema.json",
+  "title": "Course comparison candidates",
+  "type": "object",
+  "required": ["schema_version", "created_at", "courses", "candidates"],
+  "properties": {
+    "schema_version": {
+      "const": "course-connector.comparison-candidates.v0.1"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "courses": {
+      "type": "object",
+      "required": ["course_a", "course_b"],
+      "properties": {
+        "course_a": {"$ref": "#/$defs/courseRef"},
+        "course_b": {"$ref": "#/$defs/courseRef"}
+      },
+      "additionalProperties": false
+    },
+    "candidate_counts": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "candidates": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/candidate"}
+    }
+  },
+  "$defs": {
+    "courseRef": {
+      "type": "object",
+      "required": ["course_id", "title", "source_path"],
+      "properties": {
+        "course_id": {"type": "string"},
+        "title": {"type": "string"},
+        "source_path": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "candidate": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "candidate_type",
+        "relation_hint",
+        "course_a",
+        "course_b",
+        "payload",
+        "evidence_refs",
+        "preliminary_score",
+        "review_required"
+      ],
+      "properties": {
+        "candidate_id": {"type": "string"},
+        "candidate_type": {
+          "enum": ["coverage_verification", "alignment_verification"]
+        },
+        "relation_hint": {
+          "enum": ["reinforcement", "duplication", "internal_gap", "course_break", "uncertain"]
+        },
+        "course_a": {"$ref": "#/$defs/courseSide"},
+        "course_b": {"$ref": "#/$defs/courseSide"},
+        "payload": {"type": "object"},
+        "evidence_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidenceRef"},
+          "minItems": 1
+        },
+        "preliminary_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "review_required": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "courseSide": {
+      "type": "object",
+      "required": ["course_id"],
+      "properties": {
+        "course_id": {"type": "string"},
+        "unit_id": {"type": ["string", "null"]},
+        "unit_title": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "evidenceRef": {
+      "type": "object",
+      "required": ["ref_id", "course_id", "source_type", "path"],
+      "properties": {
+        "ref_id": {"type": "string"},
+        "course_id": {"type": "string"},
+        "unit_id": {"type": ["string", "null"]},
+        "source_type": {"type": "string"},
+        "path": {"type": "string"},
+        "heading": {"type": ["string", "null"]},
+        "module_id": {"type": ["integer", "string", "null"]},
+        "module_type": {"type": ["string", "null"]},
+        "text": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}
