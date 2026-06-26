@@ -1,0 +1,3 @@
+kind,title,reference
+article,Local CLI workflow,README.md
+dataset,Example mapping,data/examples/mapping.json

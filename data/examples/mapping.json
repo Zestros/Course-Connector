@@ -1,0 +1,10 @@
+{
+  "course_a": "Course A",
+  "course_b": "Course B",
+  "links": [
+    {
+      "from": "Python basics",
+      "to": "CLI tools"
+    }
+  ]
+}

@@ -1,3 +1,9 @@
 .codex
 .DS_Store
 AGENTS.md
+openspec
+__pycache__/
+*.py[cod]
+*.egg-info/
+outputs/*
+!outputs/.gitkeep
