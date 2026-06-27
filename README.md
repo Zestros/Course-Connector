@@ -16,6 +16,26 @@ source .venv/bin/activate
 python3 -m pip install -e .
 ```
 
+Или через Makefile:
+
+```bash
+cp .env.example .env
+make install
+make test
+make demo
+```
+
+Основные команды:
+
+```bash
+make install      # создает .venv и устанавливает dev-зависимости
+make test         # запускает pytest
+make demo         # запускает воспроизводимый mock-demo и проверяет result.json
+make run-cli      # показывает справку CLI
+make docker-build # собирает Docker-образ
+make docker-up    # запускает demo через docker compose
+```
+
 Для обычного `keyword` retrieval и OpenRouter дополнительные ML-зависимости не нужны.
 
 ## Входные файлы
