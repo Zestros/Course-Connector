@@ -45,8 +45,16 @@ def test_run_command_creates_expected_outputs(tmp_path: Path) -> None:
     assert (output_dir / "result.json").is_file()
     assert sorted(path.name for path in output_dir.iterdir()) == ["report.md", "result.json"]
     result = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
+    report = (output_dir / "report.md").read_text(encoding="utf-8")
+    assert result["summary"]
+    assert result["relations"]
+    assert result["warnings"] == []
+    assert result["provider_mode"] == "mock"
     assert result["inputs"]["skill_dictionary"]["source_path"] == str(skill_dictionary)
     assert result["inputs"]["assessments"]["format"] == "csv"
+    assert "## Analysis Summary" in report
+    assert "## Relations" in report
+    assert "useful_repetition" in report
 
 
 def test_run_command_allows_omitted_config(tmp_path: Path) -> None:
