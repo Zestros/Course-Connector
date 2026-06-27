@@ -287,7 +287,11 @@ def test_openrouter_key_prefers_environment_and_is_not_metadata(
     assert "env-key" not in repr(provider)
 
 
-def test_openrouter_missing_key_error_does_not_expose_secret_path(tmp_path: Path) -> None:
+def test_openrouter_missing_key_error_does_not_expose_secret_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     config = LLMConfig(provider="openrouter", api_key_file=tmp_path / "missing-key.txt")
 
     with pytest.raises(LLMConfigurationError) as exc_info:
