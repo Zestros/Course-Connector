@@ -1,21 +1,14 @@
-"""Minimal pipeline orchestration for course connector."""
+"""Minimal pipeline orchestration for Course Connector."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
-@dataclass(frozen=True)
-class PipelineInputs:
-    """Validated input files for the pipeline."""
-
-    course_a: Path
-    course_b: Path
-    mapping: Path
-    source_pack: Path
-    config: Path | None = None
+INPUT_ROLES = ("course_a", "course_b", "skill_dictionary", "assessments", "config")
 
 
 @dataclass(frozen=True)
@@ -23,52 +16,72 @@ class PipelineResult:
     """Files produced by the pipeline."""
 
     report_md: Path
-    summary_json: Path
+    result_json: Path
 
 
-def run_pipeline(inputs: PipelineInputs, output_dir: Path) -> PipelineResult:
-    """Run a minimal local pipeline and write placeholder output files."""
+def run_pipeline(input_payload: dict[str, Any], output_dir: Path) -> PipelineResult:
+    """Run a minimal local pipeline and write MVP output files."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     result = PipelineResult(
         report_md=output_dir / "report.md",
-        summary_json=output_dir / "summary.json",
+        result_json=output_dir / "result.json",
     )
-
-    result.report_md.write_text(
-        _build_markdown_report(inputs),
+    result.report_md.write_text(_build_markdown_report(input_payload), encoding="utf-8")
+    result.result_json.write_text(
+        json.dumps(_build_result(input_payload, result), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    result.summary_json.write_text(
-        json.dumps(_build_summary(inputs, result), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
     return result
 
 
-def _build_markdown_report(inputs: PipelineInputs) -> str:
-    return (
-        "# Course Connector Report\n\n"
-        "Pipeline reached successfully.\n\n"
-        "## Inputs\n\n"
-        f"- Course A: `{inputs.course_a}`\n"
-        f"- Course B: `{inputs.course_b}`\n"
-        f"- Mapping: `{inputs.mapping}`\n"
-        f"- Source pack: `{inputs.source_pack}`\n"
-        f"- Config: `{inputs.config}`\n"
-    )
+def _build_markdown_report(input_payload: dict[str, Any]) -> str:
+    lines = [
+        "# Course Connector Report",
+        "",
+        "Pipeline reached the MVP input layer successfully.",
+        "",
+        "## Inputs",
+        "",
+    ]
+    for role in INPUT_ROLES:
+        entry = input_payload.get(role)
+        label = role.replace("_", " ").title()
+        if entry is None:
+            lines.append(f"- {label}: not provided")
+            continue
+        lines.append(f"- {label}: `{entry['source_path']}` ({entry['format']})")
+
+    warnings = input_payload.get("warnings") or []
+    lines.extend(["", "## Warnings", ""])
+    if warnings:
+        lines.extend(f"- {warning}" for warning in warnings)
+    else:
+        lines.append("- None")
+    lines.append("")
+    return "\n".join(lines)
 
 
-def _build_summary(inputs: PipelineInputs, result: PipelineResult) -> dict[str, object]:
+def _build_result(input_payload: dict[str, Any], result: PipelineResult) -> dict[str, Any]:
     return {
         "status": "completed",
+        "pipeline_stage": "mvp_input_layer",
         "inputs": {
-            key: str(value) if value is not None else None
-            for key, value in asdict(inputs).items()
+            role: _input_summary(input_payload.get(role))
+            for role in INPUT_ROLES
         },
+        "warnings": list(input_payload.get("warnings") or []),
         "outputs": {
             "report_md": str(result.report_md),
-            "summary_json": str(result.summary_json),
+            "result_json": str(result.result_json),
         },
+    }
+
+
+def _input_summary(entry: Any) -> dict[str, Any] | None:
+    if entry is None:
+        return None
+    return {
+        "source_path": entry.get("source_path"),
+        "format": entry.get("format"),
     }

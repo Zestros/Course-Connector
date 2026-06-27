@@ -1,0 +1,6 @@
+output_language: ru
+include_summary: true
+relation_types:
+  - useful_repetition
+  - probable_duplication
+  - probable_gap

@@ -16,15 +16,15 @@ python3 -m pip install -e .
 
 ```bash
 course-connector run \
-  --course-a data/examples/course_a.md \
-  --course-b data/examples/course_b.yaml \
-  --mapping data/examples/mapping.json \
-  --source-pack data/examples/source_pack.csv \
-  --config data/examples/config.yaml \
+  --course-a data/examples/course_a/course.yaml \
+  --course-b data/examples/course_b/course.yaml \
+  --skill-dictionary data/examples/skill_dictionary.yaml \
+  --assessments data/examples/assessments.csv \
+  --config configs/default.yaml \
   --output-dir outputs/
 ```
 
-После успешного запуска в `outputs/` будут созданы один Markdown-репорт и один JSON-файл:
+После успешного запуска в `outputs/` будут созданы человекочитаемый Markdown-отчет и машинно-читаемый JSON-результат:
 
 - `report.md`
-- `summary.json`
+- `result.json`

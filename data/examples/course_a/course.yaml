@@ -1,0 +1,9 @@
+id: course_a
+title: Основы анализа учебных данных
+topics:
+  - Python basics
+  - Data processing
+  - Report generation
+learning_outcomes:
+  - Читать простые наборы данных
+  - Готовить краткий аналитический отчет
