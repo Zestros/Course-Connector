@@ -12,7 +12,7 @@ source .venv/bin/activate
 python3 -m pip install -e .
 ```
 
-Запустите pipeline на демонстрационных данных:
+Запустите pipeline на демонстрационных данных. MVP использует локальный mock LLM mode, поэтому для demo не нужны API-ключи и интернет:
 
 ```bash
 course-connector run \
@@ -28,3 +28,5 @@ course-connector run \
 
 - `report.md`
 - `result.json`
+
+`result.json` содержит краткое резюме анализа, список найденных relation-кандидатов, warnings, provider mode и сводку входных файлов.
