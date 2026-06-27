@@ -4,3 +4,11 @@ relation_types:
   - useful_repetition
   - probable_duplication
   - probable_gap
+llm:
+  provider: mock
+  model: openai/gpt-oss-120b:free
+  temperature: 0.0
+  timeout_seconds: 60
+  debug: false
+  output_language: ru
+  prompt_template: default_analysis_prompt.md
