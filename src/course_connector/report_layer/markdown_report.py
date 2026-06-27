@@ -104,7 +104,9 @@ def _append_relations(lines: list[str], relations: list[dict[str, Any]]) -> None
             ]
         )
         if relation.get("evidence_refs"):
-            lines.append(f"  - Evidence refs: `{len(relation['evidence_refs'])}`")
+            lines.append("  - Evidence:")
+            for evidence_ref in relation["evidence_refs"]:
+                lines.append(f"    - {_format_evidence_ref(evidence_ref)}")
 
 
 def _format_confidence(value: Any) -> str:
@@ -112,6 +114,30 @@ def _format_confidence(value: Any) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return "unknown"
+
+
+def _format_evidence_ref(evidence_ref: dict[str, Any]) -> str:
+    role = evidence_ref.get("source_role") or "unknown"
+    source_type = evidence_ref.get("source_type") or "source"
+    source_path = evidence_ref.get("source_path") or "unknown source"
+    chunk_id = evidence_ref.get("chunk_id") or "unknown chunk"
+    locator = _format_locator(evidence_ref.get("locator"))
+    return f"`{role}` `{source_type}` `{chunk_id}`: `{source_path}` -> `{locator}`"
+
+
+def _format_locator(locator: Any) -> str:
+    if not isinstance(locator, dict):
+        return "unknown"
+    kind = locator.get("kind")
+    if kind == "object_path":
+        return str(locator.get("object_path") or "object_path")
+    if kind == "row_index":
+        return f"row {locator.get('row_index')}"
+    if kind == "line_range":
+        return f"lines {locator.get('line_start')}..{locator.get('line_end')}"
+    if kind == "coarse_file":
+        return "whole file"
+    return str(kind or "unknown")
 
 
 def _dedupe_warnings(warnings: list[Any]) -> list[str]:

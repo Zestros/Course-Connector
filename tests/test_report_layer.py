@@ -34,6 +34,43 @@ def test_markdown_report_groups_relations_by_type() -> None:
     assert "Provider warning" in report
 
 
+def test_markdown_report_prints_human_readable_evidence_refs() -> None:
+    analysis = _analysis()
+    analysis["relations"][0]["evidence_refs"] = [
+        {
+            "chunk_id": "course_a_assessment_02",
+            "source_role": "course_a",
+            "source_path": "data/examples/course_a/course.yaml",
+            "source_type": "assessment",
+            "locator": {
+                "kind": "object_path",
+                "object_path": "assessments[1]",
+            },
+        },
+        {
+            "chunk_id": "assessments_row_003",
+            "source_role": "assessments",
+            "source_path": "data/examples/assessments.csv",
+            "source_type": "row",
+            "locator": {
+                "kind": "row_index",
+                "row_index": 3,
+            },
+        },
+    ]
+
+    report = render_markdown_report(
+        _payload(),
+        analysis,
+        run_id="run_001",
+        generated_at="2026-06-27T00:00:00+00:00",
+    )
+
+    assert "  - Evidence:" in report
+    assert "`course_a` `assessment` `course_a_assessment_02`: `data/examples/course_a/course.yaml` -> `assessments[1]`" in report
+    assert "`assessments` `row` `assessments_row_003`: `data/examples/assessments.csv` -> `row 3`" in report
+
+
 def test_json_result_contains_relations_sources_and_run_metadata(tmp_path: Path) -> None:
     output_paths = {
         "report_md": tmp_path / "report.md",
