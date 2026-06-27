@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
@@ -165,6 +166,24 @@ def test_config_selects_mock_by_default() -> None:
     config = LLMConfig.from_input_payload(_payload())
 
     assert config.provider == "mock"
+    assert isinstance(create_provider(config), MockLLMProvider)
+
+
+def test_project_default_config_uses_mock_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("COURSE_CONNECTOR_LLM_PROVIDER", raising=False)
+    config_path = PROJECT_ROOT / "configs" / "default.yaml"
+    payload = _payload()
+    payload["config"] = {
+        "source_path": str(config_path),
+        "format": "yaml",
+        "raw_text": config_path.read_text(encoding="utf-8"),
+        "parsed_data": yaml.safe_load(config_path.read_text(encoding="utf-8")),
+    }
+
+    config = LLMConfig.from_input_payload(payload)
+
+    assert config.provider == "mock"
+    assert config.api_key_file is None
     assert isinstance(create_provider(config), MockLLMProvider)
 
 

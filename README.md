@@ -40,13 +40,12 @@ course-connector run \
 
 ## Текущий default
 
-Сейчас [configs/default.yaml](configs/default.yaml) настроен на реальный OpenRouter-запуск:
+Сейчас [configs/default.yaml](configs/default.yaml) настроен на воспроизводимый mock-запуск без внешних сервисов:
 
 ```yaml
 llm:
-  provider: openrouter
+  provider: mock
   model: openai/gpt-oss-120b:free
-  api_key_file: LLM_apikey/key.txt
 
 preprocessing:
   enabled: true
@@ -60,8 +59,8 @@ preprocessing:
 
 То есть default:
 
-- использует реальную LLM через OpenRouter
-- берет ключ из `LLM_apikey/key.txt`, если `OPENROUTER_API_KEY` не задан
+- работает без API-ключей, сети и внешних сервисов
+- возвращает стабильные mock relation-кандидаты
 - включает lightweight preprocessing
 - использует `keyword` retrieval без embedding-модели
 - не загружает `sentence-transformers`
