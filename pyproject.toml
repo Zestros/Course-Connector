@@ -12,8 +12,16 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+local-embeddings = [
+    "sentence-transformers",
+]
+
 [project.scripts]
 course-connector = "course_connector.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+course_connector = ["llm_layer/prompts/*.md"]

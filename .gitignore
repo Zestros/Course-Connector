@@ -5,5 +5,9 @@ openspec
 __pycache__/
 *.py[cod]
 *.egg-info/
+.env
+LLM_apikey/
+*.key
+key.txt
 outputs/*
 !outputs/.gitkeep
