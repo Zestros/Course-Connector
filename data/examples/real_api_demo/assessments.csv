@@ -1,0 +1,10 @@
+course_id,assessment_id,title,skill_id,task
+data_literacy_basics,quiz_01,Мини-тест по структуре данных,data_table_reading,Определить назначение колонок и типы признаков в небольшой CSV-таблице.
+data_literacy_basics,quiz_01,Мини-тест по структуре данных,data_types_missing,Найти пропуски и объяснить возможное влияние на выводы.
+data_literacy_basics,report_01,Короткий отчет по учебному датасету,data_cleaning,Очистить учебный датасет и описать сделанные исправления.
+data_literacy_basics,report_01,Короткий отчет по учебному датасету,report_writing,Собрать Markdown-отчет с таблицей результатов и кратким выводом.
+ml_project_starter,lab_01,Лабораторная работа по подготовке данных,train_test_split,Разделить данные на обучающую и тестовую выборки.
+ml_project_starter,project_01,Мини-проект с baseline моделью,baseline_model,Обучить простую baseline модель и сохранить параметры запуска.
+ml_project_starter,project_01,Мини-проект с baseline моделью,metric_selection,Выбрать метрику качества и объяснить, почему она подходит задаче.
+ml_project_starter,project_01,Мини-проект с baseline моделью,experiment_tracking,Зафиксировать параметры и результат каждого эксперимента.
+ml_project_starter,project_01,Мини-проект с baseline моделью,model_limitations,Описать ограничения модели и риски интерпретации.

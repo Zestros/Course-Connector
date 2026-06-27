@@ -35,10 +35,10 @@ def analyze_courses(
     )
     response = provider.generate(prompt)
     analysis = parse_provider_response(response.text)
-    analysis["warnings"] = [
+    analysis["warnings"] = _dedupe_warnings([
         *list(input_payload.get("warnings") or []),
         *list(analysis.get("warnings") or []),
-    ]
+    ])
     analysis["relations"] = normalize_relations(analysis.get("relations") or [], analysis["warnings"])
     analysis["provider"] = response.metadata.get("provider", "unknown")
     analysis["provider_mode"] = response.metadata.get("mode", analysis["provider"])
@@ -46,3 +46,15 @@ def analyze_courses(
         analysis["raw_response"] = response.text
         analysis["prompt"] = prompt
     return analysis
+
+
+def _dedupe_warnings(warnings: list[Any]) -> list[str]:
+    result = []
+    seen = set()
+    for warning in warnings:
+        text = str(warning)
+        if text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result

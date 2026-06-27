@@ -25,6 +25,7 @@ def build_prompt(
                 "course_b_fragment": "",
                 "explanation": "",
                 "confidence": 0.7,
+                "evidence_refs": [],
             }
         ],
         "warnings": [],
@@ -37,6 +38,7 @@ def build_prompt(
         course_b_text=context["course_b"]["text"],
         skill_dictionary_text=context["skill_dictionary"]["text"],
         assessments_text=context["assessments"]["text"],
+        retrieved_pairs_text=context.get("retrieved_pairs", {}).get("text", "[]"),
         warnings_json=json.dumps(context["warnings"], ensure_ascii=False, indent=2),
     )
 

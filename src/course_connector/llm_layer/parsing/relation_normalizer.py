@@ -24,15 +24,16 @@ def normalize_relations(relations: list[Any], warnings: list[str]) -> list[dict[
             warnings.append(f"Unsupported relation type `{relation_type}` in relation #{index}.")
             continue
         confidence = _confidence(relation.get("confidence"), warnings, index)
-        normalized.append(
-            {
-                "type": relation_type,
-                "course_a_fragment": str(relation.get("course_a_fragment") or ""),
-                "course_b_fragment": str(relation.get("course_b_fragment") or ""),
-                "explanation": str(relation.get("explanation") or ""),
-                "confidence": confidence,
-            }
-        )
+        item = {
+            "type": relation_type,
+            "course_a_fragment": str(relation.get("course_a_fragment") or ""),
+            "course_b_fragment": str(relation.get("course_b_fragment") or ""),
+            "explanation": str(relation.get("explanation") or ""),
+            "confidence": confidence,
+        }
+        if isinstance(relation.get("evidence_refs"), list):
+            item["evidence_refs"] = relation["evidence_refs"]
+        normalized.append(item)
     return normalized
 
 

@@ -25,5 +25,8 @@ Skill dictionary:
 Assessments:
 {assessments_text}
 
+Retrieved evidence pairs:
+{retrieved_pairs_text}
+
 Input warnings:
 {warnings_json}

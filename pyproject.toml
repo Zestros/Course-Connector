@@ -12,6 +12,11 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+local-embeddings = [
+    "sentence-transformers",
+]
+
 [project.scripts]
 course-connector = "course_connector.cli:main"
 

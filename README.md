@@ -31,6 +31,60 @@ course-connector run \
 
 `result.json` содержит краткое резюме анализа, список найденных relation-кандидатов, warnings, provider mode и сводку входных файлов.
 
+## Промежуточный слой обработки
+
+Между Input layer и LLM layer есть опциональный preprocessing layer. Он нужен для больших курсов: вместо отправки всех файлов целиком в LLM он может выделить chunks, выбрать релевантные evidence pairs и передать модели компактный context.
+
+По умолчанию слой выключен, поэтому базовый запуск не требует embedding-модель и не импортирует `sentence-transformers`:
+
+```yaml
+preprocessing:
+  enabled: false
+  write_intermediate_outputs: true
+  chunking:
+    enabled: true
+    strategy: educational_entities
+    max_chunk_chars: 900
+    max_pair_text_chars: 160
+  retrieval:
+    enabled: false
+    mode: none
+    top_k: 18
+    fallback_mode: keyword
+  embeddings:
+    enabled: false
+    provider: local_sentence_transformer
+    model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    local_files_only: true
+  token_budget:
+    enabled: true
+    max_input_tokens: 80000
+    reserve_output_tokens: 8000
+```
+
+Режимы retrieval:
+
+- `none`: preprocessing может быть выключен или не строить retrieved pairs.
+- `keyword`: работает без ML-зависимостей, использует skill ids, aliases, titles, keywords и типы источников.
+- `local_embeddings`: использует локальную sentence-transformers модель, только если это явно включено.
+
+Для local embeddings установите optional dependencies:
+
+```bash
+python3 -m pip install -e ".[local-embeddings]"
+```
+
+Embedding-модель не скачивается автоматически при обычном запуске. При `local_files_only: true` она должна уже быть в локальном кэше; иначе используйте `retrieval.mode: keyword` или явно настройте загрузку модели отдельно.
+
+Когда preprocessing включен и `write_intermediate_outputs: true`, pipeline дополнительно пишет:
+
+- `chunks_course_a.json`
+- `chunks_course_b.json`
+- `retrieved_pairs.json`
+- `preprocessing_summary.json`
+
+Chunks и retrieved pairs содержат ссылки для human review: `source_path`, `source_role`, `source_format`, `source_type`, `chunk_id`, `locator`, а где возможно `line_start`, `line_end`, `row_index` или `object_path`.
+
 ## LLM слой
 
 LLM слой разделен на независимые части:
