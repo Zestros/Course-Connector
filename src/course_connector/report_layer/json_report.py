@@ -21,7 +21,7 @@ def build_json_result(
 ) -> dict[str, Any]:
     """Build the stable MVP JSON result object."""
     result = {
-        "status": "completed",
+        "status": analysis.get("status", "completed"),
         "run_id": run_id,
         "generated_at": generated_at,
         "pipeline_stage": "mvp_llm_analysis_layer",

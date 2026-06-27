@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import urllib.error
 import urllib.request
 
@@ -46,6 +47,8 @@ class OpenRouterProvider(LLMProvider):
             raise RuntimeError(f"OpenRouter request failed with HTTP {exc.code}.") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError("OpenRouter request failed before receiving a response.") from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise RuntimeError("OpenRouter request timed out before receiving a response.") from exc
         except json.JSONDecodeError as exc:
             raise RuntimeError("OpenRouter returned a response that was not valid JSON.") from exc
 

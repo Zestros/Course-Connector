@@ -27,6 +27,14 @@ from course_connector.llm_layer.providers.factory import create_provider
 from course_connector.llm_layer.providers.openrouter_provider import OpenRouterProvider
 
 
+class FailingProvider(StaticLLMProvider):
+    def __init__(self) -> None:
+        super().__init__("")
+
+    def generate(self, prompt: str):  # type: ignore[no-untyped-def]
+        raise RuntimeError("simulated provider failure")
+
+
 def test_mock_provider_returns_deterministic_analysis_shape() -> None:
     payload = _payload()
 
@@ -97,6 +105,16 @@ def test_invalid_provider_json_returns_fallback_warning() -> None:
     assert analysis["relations"] == []
     assert analysis["summary"] == "Provider response could not be parsed as JSON."
     assert any("Provider JSON could not be parsed" in warning for warning in analysis["warnings"])
+
+
+def test_provider_failure_returns_stable_error_result() -> None:
+    analysis = analyze_courses(_payload(), provider=FailingProvider(), config=LLMConfig(provider="openrouter"))
+
+    assert analysis["status"] == "provider_error"
+    assert analysis["relations"] == []
+    assert analysis["provider"] == "openrouter"
+    assert analysis["provider_mode"] == "error"
+    assert any("simulated provider failure" in warning for warning in analysis["warnings"])
 
 
 def test_unsupported_relation_type_is_reported() -> None:

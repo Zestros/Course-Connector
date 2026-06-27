@@ -33,7 +33,10 @@ def analyze_courses(
         template_name=config.prompt_template,
         output_language=config.output_language,
     )
-    response = provider.generate(prompt)
+    try:
+        response = provider.generate(prompt)
+    except Exception as exc:
+        return _provider_error_result(input_payload, config, exc, prompt if debug or config.debug else None)
     analysis = parse_provider_response(response.text)
     analysis["warnings"] = _dedupe_warnings([
         *list(input_payload.get("warnings") or []),
@@ -46,6 +49,26 @@ def analyze_courses(
         analysis["raw_response"] = response.text
         analysis["prompt"] = prompt
     return analysis
+
+
+def _provider_error_result(
+    input_payload: dict[str, Any],
+    config: LLMConfig,
+    exc: Exception,
+    prompt: str | None,
+) -> dict[str, Any]:
+    warning = f"LLM provider `{config.provider}` failed: {exc}"
+    result = {
+        "status": "provider_error",
+        "summary": "LLM provider did not return a usable response. See warnings for details.",
+        "relations": [],
+        "warnings": _dedupe_warnings([*list(input_payload.get("warnings") or []), warning]),
+        "provider": config.provider,
+        "provider_mode": "error",
+    }
+    if prompt is not None:
+        result["prompt"] = prompt
+    return result
 
 
 def _dedupe_warnings(warnings: list[Any]) -> list[str]:
