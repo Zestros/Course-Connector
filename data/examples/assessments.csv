@@ -1,0 +1,3 @@
+course_id,assessment_id,title,skill_id,type
+course_a,a1,Мини-отчет по набору данных,data_processing,project
+course_b,b1,CLI-проверка входных файлов,file_validation,practical

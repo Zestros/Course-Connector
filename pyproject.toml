@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "CLI pipeline for connecting course materials."
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+]
 
 [project.scripts]
 course-connector = "course_connector.cli:main"

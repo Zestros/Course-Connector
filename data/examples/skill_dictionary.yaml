@@ -1,0 +1,13 @@
+skills:
+  - id: python_basics
+    title: Python basics
+    description: Базовое чтение и обработка данных на Python.
+  - id: data_processing
+    title: Data processing
+    description: Подготовка данных для анализа и отчета.
+  - id: cli_tools
+    title: CLI tools
+    description: Запуск локальных инструментов через командную строку.
+  - id: file_validation
+    title: File validation
+    description: Проверка наличия и формата входных файлов.

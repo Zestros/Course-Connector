@@ -1,0 +1,9 @@
+id: course_b
+title: Проектная автоматизация отчетов
+topics:
+  - CLI tools
+  - File validation
+  - Automation
+learning_outcomes:
+  - Запускать локальные CLI-инструменты
+  - Проверять входные файлы перед обработкой
