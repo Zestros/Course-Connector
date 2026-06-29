@@ -171,8 +171,9 @@ def test_config_selects_mock_by_default() -> None:
     assert isinstance(create_provider(config), MockLLMProvider)
 
 
-def test_project_default_config_uses_mock_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_project_default_config_uses_openrouter_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("COURSE_CONNECTOR_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     config_path = PROJECT_ROOT / "configs" / "default.yaml"
     payload = _payload()
     payload["config"] = {
@@ -184,9 +185,9 @@ def test_project_default_config_uses_mock_provider(monkeypatch: pytest.MonkeyPat
 
     config = LLMConfig.from_input_payload(payload)
 
-    assert config.provider == "mock"
-    assert config.api_key_file is None
-    assert isinstance(create_provider(config), MockLLMProvider)
+    assert config.provider == "openrouter"
+    assert config.api_key_file == Path("LLM_apikey/key.txt")
+    assert isinstance(create_provider(config), OpenRouterProvider)
 
 
 def test_config_can_select_openrouter_without_changing_input_boundary() -> None:

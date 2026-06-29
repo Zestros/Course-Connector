@@ -38,8 +38,9 @@ def retrieve_pairs(
 def keyword_retrieve(chunks: dict[str, list[dict[str, Any]]], config: PreprocessingConfig) -> list[dict[str, Any]]:
     """Rank pairs by skill, keyword, title, and source-type evidence."""
     scored = []
+    comparison_chunks = _comparison_chunks(chunks)
     for chunk_a in chunks.get("course_a", []):
-        for chunk_b in [*chunks.get("course_b", []), *chunks.get("assessments", [])]:
+        for chunk_b in comparison_chunks:
             score = _keyword_score(chunk_a, chunk_b)
             if score <= 0:
                 continue
@@ -61,7 +62,7 @@ def embedding_retrieve(
 ) -> list[dict[str, Any]]:
     """Retrieve pairs with embedding cosine similarity and balanced selection."""
     chunks_a = chunks.get("course_a", [])
-    chunks_b = [*chunks.get("course_b", []), *chunks.get("assessments", [])]
+    chunks_b = _comparison_chunks(chunks)
     embeddings_a = provider.embed([_embedding_text(chunk) for chunk in chunks_a])
     embeddings_b = provider.embed([_embedding_text(chunk) for chunk in chunks_b])
     scored = []
@@ -87,6 +88,38 @@ def _embedding_provider(config: PreprocessingConfig) -> EmbeddingProvider:
     if config.embeddings.provider != "local_sentence_transformer":
         raise PreprocessingConfigurationError(f"Unsupported embedding provider `{config.embeddings.provider}`.")
     return LocalSentenceTransformerEmbeddingProvider(config.embeddings)
+
+
+def _comparison_chunks(chunks: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    course_a_ids = _course_ids(chunks.get("course_a", []))
+    course_b_ids = _course_ids(chunks.get("course_b", []))
+    assessment_chunks = [
+        chunk
+        for chunk in chunks.get("assessments", [])
+        if _assessment_belongs_to_comparison_side(chunk, course_a_ids, course_b_ids)
+    ]
+    return [*chunks.get("course_b", []), *assessment_chunks]
+
+
+def _course_ids(chunks: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(chunk.get("course_id"))
+        for chunk in chunks
+        if chunk.get("course_id")
+    }
+
+
+def _assessment_belongs_to_comparison_side(
+    chunk: dict[str, Any],
+    course_a_ids: set[str],
+    course_b_ids: set[str],
+) -> bool:
+    course_id = str(chunk.get("course_id") or "").strip()
+    if not course_id:
+        return True
+    if course_b_ids:
+        return course_id in course_b_ids
+    return course_id not in course_a_ids
 
 
 def _pair(

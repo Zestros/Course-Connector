@@ -109,6 +109,22 @@ def test_keyword_retrieval_ignores_unrelated_generated_outcome_positions() -> No
     assert context["retrieved_pairs"] == []
 
 
+def test_keyword_retrieval_does_not_treat_course_a_assessment_as_course_b_evidence() -> None:
+    context = prepare_analysis_context(
+        _course_id_assessments_payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=5),
+        ),
+    )
+
+    pairs = context["retrieved_pairs"]
+
+    assert pairs
+    assert all("course_a a1" not in pair["course_b_text"] for pair in pairs)
+    assert any("course_b b1" in pair["course_b_text"] for pair in pairs)
+
+
 def test_preprocessing_config_rejects_invalid_context_budget() -> None:
     payload = dict(_payload())
     payload["config"] = {
@@ -543,6 +559,69 @@ def _unrelated_outcomes_payload() -> dict[str, object]:
         "raw_text": "title,skill\nБез совпадений,totally_different\n",
         "normalized_text": "title,skill\nБез совпадений,totally_different",
         "parsed_data": [{"title": "Без совпадений", "skill": "totally_different"}],
+    }
+    return payload
+
+
+def _course_id_assessments_payload() -> dict[str, object]:
+    payload = dict(_payload())
+    payload["course_a"] = {
+        "source_path": "course_a.yaml",
+        "format": "yaml",
+        "raw_text": "id: course_a\ntopics:\n  - Data processing\n",
+        "normalized_text": "id: course_a\ntopics:\n  - Data processing\n",
+        "parsed_data": {"id": "course_a", "topics": ["Data processing"]},
+    }
+    payload["course_b"] = {
+        "source_path": "course_b.yaml",
+        "format": "yaml",
+        "raw_text": "id: course_b\ntopics:\n  - Data processing\n",
+        "normalized_text": "id: course_b\ntopics:\n  - Data processing\n",
+        "parsed_data": {"id": "course_b", "topics": ["Data processing"]},
+    }
+    payload["skill_dictionary"] = {
+        "source_path": "skills.yaml",
+        "format": "yaml",
+        "raw_text": "skills:\n  - id: data_processing\n    title: Data processing\n",
+        "parsed_data": {
+            "skills": [
+                {
+                    "id": "data_processing",
+                    "title": "Data processing",
+                    "aliases": [],
+                }
+            ]
+        },
+    }
+    payload["assessments"] = {
+        "source_path": "assessments.csv",
+        "format": "csv",
+        "raw_text": (
+            "course_id,assessment_id,title,skill_id,type\n"
+            "course_a,a1,Course A data task,data_processing,project\n"
+            "course_b,b1,Course B data task,data_processing,project\n"
+        ),
+        "normalized_text": (
+            "course_id,assessment_id,title,skill_id,type\n"
+            "course_a,a1,Course A data task,data_processing,project\n"
+            "course_b,b1,Course B data task,data_processing,project\n"
+        ),
+        "parsed_data": [
+            {
+                "course_id": "course_a",
+                "assessment_id": "a1",
+                "title": "Course A data task",
+                "skill_id": "data_processing",
+                "type": "project",
+            },
+            {
+                "course_id": "course_b",
+                "assessment_id": "b1",
+                "title": "Course B data task",
+                "skill_id": "data_processing",
+                "type": "project",
+            },
+        ],
     }
     return payload
 

@@ -57,6 +57,7 @@ def _course_yaml_chunks(
     warnings: list[str],
 ) -> list[dict[str, Any]]:
     chunks: list[dict[str, Any]] = []
+    course_id = str(data.get("id") or "") or None
     topics = data.get("topics") if isinstance(data.get("topics"), list) else []
     for index, topic in enumerate(topics, start=1):
         text = str(topic.get("title") if isinstance(topic, dict) else topic)
@@ -72,6 +73,7 @@ def _course_yaml_chunks(
             skill_ids=skills,
             locator=object_path_locator(f"topics[{index - 1}]"),
             config=config,
+            extra_metadata={"course_id": course_id},
         ))
 
     modules = data.get("modules") if isinstance(data.get("modules"), list) else []
@@ -97,6 +99,7 @@ def _course_yaml_chunks(
             skill_ids=skills,
             locator=object_path_locator(f"modules[{index - 1}]"),
             config=config,
+            extra_metadata={"course_id": course_id},
         ))
 
     outcomes = data.get("learning_outcomes") if isinstance(data.get("learning_outcomes"), list) else []
@@ -114,6 +117,7 @@ def _course_yaml_chunks(
             skill_ids=skills,
             locator=object_path_locator(f"learning_outcomes[{index - 1}]"),
             config=config,
+            extra_metadata={"course_id": course_id},
         ))
 
     assessments = data.get("assessments") if isinstance(data.get("assessments"), list) else []
@@ -134,6 +138,7 @@ def _course_yaml_chunks(
             skill_ids=skills or _infer_skill_ids(text, skill_index),
             locator=object_path_locator(f"assessments[{index - 1}]"),
             config=config,
+            extra_metadata={"course_id": course_id},
         ))
 
     if not chunks:
@@ -169,6 +174,10 @@ def _assessment_chunks(
                 skill_ids=_infer_skill_ids(text, skill_index),
                 locator=row_locator(index),
                 config=config,
+                extra_metadata={
+                    "course_id": _optional_text(row.get("course_id")),
+                    "assessment_id": _optional_text(row.get("assessment_id") or row.get("id")),
+                },
             ))
         return chunks
     if entry.get("format") == "yaml" and isinstance(entry.get("parsed_data"), (dict, list)):
@@ -201,6 +210,10 @@ def _structured_assessment_chunks(
             skill_ids=_infer_skill_ids(text, skill_index),
             locator=object_path_locator(f"assessments[{index - 1}]"),
             config=config,
+            extra_metadata={
+                "course_id": _optional_text(item.get("course_id")) if isinstance(item, dict) else None,
+                "assessment_id": _optional_text(item.get("assessment_id") or item.get("id")) if isinstance(item, dict) else None,
+            },
         ))
     return chunks
 
@@ -272,6 +285,7 @@ def _chunk(
     config: ChunkingConfig,
     chunk_index: int | None = None,
     split_strategy: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     clean_text = _clip(_compact_text(text or title), config.max_chunk_chars)
     item = {
@@ -291,6 +305,9 @@ def _chunk(
         item["chunk_index"] = chunk_index
     if split_strategy is not None:
         item["split_strategy"] = split_strategy
+    for key, value in (extra_metadata or {}).items():
+        if value is not None and value != "":
+            item[key] = value
     return item
 
 
@@ -306,6 +323,7 @@ def _entity_chunks(
     skill_ids: list[str],
     locator: dict[str, Any],
     config: ChunkingConfig,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     compact = _compact_text(text or title)
     if len(compact) <= config.max_chunk_chars:
@@ -320,6 +338,7 @@ def _entity_chunks(
             skill_ids=skill_ids,
             locator=locator,
             config=config,
+            extra_metadata=extra_metadata,
         )]
 
     parent_chunk_id = _safe_id(chunk_id)
@@ -338,6 +357,7 @@ def _entity_chunks(
             config=config,
             chunk_index=index,
             split_strategy=strategy,
+            extra_metadata=extra_metadata,
         )
         for index, (part_text, strategy) in enumerate(parts, start=1)
     ]
@@ -494,6 +514,11 @@ def _clip(text: str, max_chars: int) -> str:
 
 def _compact_text(text: str) -> str:
     return " ".join(str(text).split())
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text or None
 
 
 def _safe_id(value: str) -> str:
