@@ -30,6 +30,10 @@ from course_connector.preprocessing_layer.embeddings.local_sentence_transformer 
     LocalSentenceTransformerEmbeddingProvider,
 )
 from course_connector.preprocessing_layer.retrieval import keyword_retrieve
+from course_connector.preprocessing_layer.token_budget import (
+    PreprocessingBudgetError,
+    recommended_chunk_tokens,
+)
 
 
 def test_default_preprocessing_config_is_lightweight() -> None:
@@ -61,6 +65,20 @@ def test_chunking_creates_source_locators_for_yaml_markdown_and_csv() -> None:
     assert "python_basics" in course_chunk["skill_ids"]
 
 
+def test_yaml_course_topics_are_chunked_as_educational_entities() -> None:
+    context = prepare_analysis_context(
+        _payload(),
+        config=PreprocessingConfig(enabled=True, retrieval=RetrievalConfig(enabled=False, mode="none")),
+    )
+
+    topics = [chunk for chunk in context["chunks"]["course_a"] if chunk["source_type"] == "topic"]
+
+    assert topics
+    assert topics[0]["title"] == "Python basics"
+    assert topics[0]["locator"] == {"kind": "object_path", "object_path": "topics[0]"}
+    assert topics[0]["skill_ids"] == ["python_basics"]
+
+
 def test_keyword_retrieval_returns_balanced_top_k_pairs_with_refs() -> None:
     context = prepare_analysis_context(
         _payload(),
@@ -77,6 +95,132 @@ def test_keyword_retrieval_returns_balanced_top_k_pairs_with_refs() -> None:
     assert pairs[0]["candidate_relation_hint"]
     assert pairs[0]["evidence_refs"]
     assert context["metrics"]["retrieved_pairs"] == len(pairs)
+
+
+def test_keyword_retrieval_ignores_unrelated_generated_outcome_positions() -> None:
+    context = prepare_analysis_context(
+        _unrelated_outcomes_payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=3),
+        ),
+    )
+
+    assert context["retrieved_pairs"] == []
+
+
+def test_keyword_retrieval_does_not_treat_course_a_assessment_as_course_b_evidence() -> None:
+    context = prepare_analysis_context(
+        _course_id_assessments_payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=5),
+        ),
+    )
+
+    pairs = context["retrieved_pairs"]
+
+    assert pairs
+    assert all("course_a a1" not in pair["course_b_text"] for pair in pairs)
+    assert any("course_b b1" in pair["course_b_text"] for pair in pairs)
+
+
+def test_selected_chunks_expand_assessment_support_by_skill_and_course() -> None:
+    context = prepare_analysis_context(
+        _markdown_assessment_support_payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=1),
+        ),
+    )
+
+    selected_chunks = context["selected_chunks"]
+    selected_text = " ".join(chunk["text"] for chunk in selected_chunks)
+    selected_roles = {chunk["source_role"] for chunk in selected_chunks}
+
+    assert "Assessment A2" in selected_text
+    assert "conflict markers" in selected_text
+    assert "GitHub review workflow" not in selected_text
+    assert "course_b" not in selected_roles
+
+
+def test_preprocessing_config_rejects_invalid_context_budget() -> None:
+    payload = dict(_payload())
+    payload["config"] = {
+        "parsed_data": {
+            "preprocessing": {
+                "token_budget": {
+                    "max_input_tokens": 100,
+                    "reserve_output_tokens": 100,
+                }
+            }
+        }
+    }
+
+    with pytest.raises(PreprocessingConfigurationError, match="reserve_output_tokens"):
+        PreprocessingConfig.from_input_payload(payload)
+
+
+def test_recommended_chunk_size_scales_with_model_context() -> None:
+    small = PreprocessingConfig(
+        enabled=True,
+        token_budget=TokenBudgetConfig(max_input_tokens=10_000, reserve_output_tokens=1_500),
+    )
+    large = PreprocessingConfig(
+        enabled=True,
+        token_budget=TokenBudgetConfig(max_input_tokens=1_000_000, reserve_output_tokens=1_500),
+    )
+
+    assert recommended_chunk_tokens(small) < recommended_chunk_tokens(large)
+
+
+def test_chunk_sizing_auto_adjusts_unsafe_character_limit() -> None:
+    context = prepare_analysis_context(
+        _payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            chunking=ChunkingConfig(max_chunk_chars=10_000, min_chunk_tokens=100),
+            retrieval=RetrievalConfig(enabled=False, mode="none"),
+            token_budget=TokenBudgetConfig(max_input_tokens=1_500, reserve_output_tokens=300),
+        ),
+    )
+
+    assert context["metrics"]["recommended_chunk_chars"] < 10_000
+    assert any("Auto-adjusted chunk size" in warning for warning in context["warnings"])
+
+
+def test_chunk_sizing_strict_mode_rejects_unsafe_character_limit() -> None:
+    with pytest.raises(PreprocessingBudgetError) as exc_info:
+        prepare_analysis_context(
+            _payload(),
+            config=PreprocessingConfig(
+                enabled=True,
+                chunking=ChunkingConfig(max_chunk_chars=10_000, min_chunk_tokens=100, strict=True),
+                retrieval=RetrievalConfig(enabled=False, mode="none"),
+                token_budget=TokenBudgetConfig(max_input_tokens=1_500, reserve_output_tokens=300),
+            ),
+        )
+
+    assert exc_info.value.code == "chunk_too_large_for_model"
+
+
+def test_large_module_is_split_into_parented_subchunks() -> None:
+    context = prepare_analysis_context(
+        _large_module_payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            chunking=ChunkingConfig(max_chunk_chars=120, min_chunk_tokens=20),
+            retrieval=RetrievalConfig(enabled=False, mode="none"),
+        ),
+    )
+
+    module_parts = [chunk for chunk in context["chunks"]["course_a"] if chunk["source_type"] == "module_part"]
+
+    assert len(module_parts) >= 2
+    assert all(len(chunk["text"]) <= 120 for chunk in module_parts)
+    assert all(chunk["parent_id"] == "course_a_module_01" for chunk in module_parts)
+    assert all(chunk["chunk_index"] >= 1 for chunk in module_parts)
+    assert all(chunk["split_strategy"] for chunk in module_parts)
 
 
 def test_local_embeddings_can_fallback_to_keyword_without_dependency() -> None:
@@ -181,19 +325,19 @@ def test_local_embedding_provider_optional_integration() -> None:
     assert vectors[0]
 
 
-def test_token_budget_compacts_retrieved_pairs() -> None:
-    context = prepare_analysis_context(
-        _payload(),
-        config=PreprocessingConfig(
-            enabled=True,
-            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=10),
-            chunking=ChunkingConfig(max_pair_text_chars=20),
-            token_budget=TokenBudgetConfig(max_input_tokens=10, reserve_output_tokens=5),
-        ),
-    )
+def test_token_budget_rejects_context_too_small_for_prompt_wrapper() -> None:
+    with pytest.raises(PreprocessingBudgetError) as exc_info:
+        prepare_analysis_context(
+            _payload(),
+            config=PreprocessingConfig(
+                enabled=True,
+                retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=10),
+                chunking=ChunkingConfig(max_pair_text_chars=20),
+                token_budget=TokenBudgetConfig(max_input_tokens=10, reserve_output_tokens=5),
+            ),
+        )
 
-    assert context["metrics"]["estimated_input_tokens"] <= 5
-    assert any("Token budget" in warning for warning in context["warnings"])
+    assert exc_info.value.code == "model_context_too_small"
 
 
 def test_llm_prompt_uses_retrieved_pairs_when_present() -> None:
@@ -212,6 +356,143 @@ def test_llm_prompt_uses_retrieved_pairs_when_present() -> None:
     assert "Retrieved evidence pairs:" in prompt
     assert "retrieved_001" in prompt
     assert "evidence_refs" in prompt
+
+
+def test_evidence_first_prompt_omits_full_raw_course_text() -> None:
+    payload = _payload_with_raw_tail("UNIQUE_RAW_TAIL_SHOULD_NOT_APPEAR")
+    context = prepare_analysis_context(
+        payload,
+        config=PreprocessingConfig(
+            enabled=True,
+            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=2),
+        ),
+    )
+    payload = dict(payload)
+    payload["preprocessing"] = context
+
+    prompt = build_prompt(build_prompt_context(payload))
+
+    assert "Selected evidence chunks:" in prompt
+    assert "UNIQUE_RAW_TAIL_SHOULD_NOT_APPEAR" not in prompt
+
+
+def test_pipeline_rejects_oversized_legacy_prompt_before_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fake_analyze_courses(payload: dict[str, object]) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {"status": "completed", "relations": [], "warnings": []}
+
+    monkeypatch.setattr("course_connector.pipeline.analyze_courses", fake_analyze_courses)
+    course_a = _write(tmp_path / "course_a.md", "# A\n" + ("very long text " * 300))
+    course_b = _write(tmp_path / "course_b.md", "# B\n" + ("another long text " * 300))
+    skill_dictionary = _write(tmp_path / "skills.yaml", _skills_yaml())
+    assessments = _write(tmp_path / "assessments.csv", "title,skill\nCLI task,python_basics\n")
+    config = _write(
+        tmp_path / "config.yaml",
+        """
+preprocessing:
+  enabled: false
+  token_budget:
+    enabled: true
+    max_input_tokens: 500
+    reserve_output_tokens: 100
+""",
+    )
+    payload = load_input_payload(
+        course_a=course_a,
+        course_b=course_b,
+        skill_dictionary=skill_dictionary,
+        assessments=assessments,
+        config=config,
+    )
+
+    with pytest.raises(PreprocessingBudgetError) as exc_info:
+        run_pipeline(payload, tmp_path / "outputs")
+
+    assert exc_info.value.code == "input_too_large_without_chunking"
+    assert called is False
+
+
+def test_pipeline_rejects_oversized_prompt_with_assessment_support(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fake_analyze_courses(payload: dict[str, object]) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {"status": "completed", "relations": [], "warnings": []}
+
+    monkeypatch.setattr("course_connector.pipeline.analyze_courses", fake_analyze_courses)
+    course_a = _write(
+        tmp_path / "course_a.md",
+        (
+            "# Course A\n"
+            "## Intro\n"
+            "Python basics introduction.\n"
+            "## Skill One\n"
+            f"{'Python basics details. ' * 60}\n"
+            "## Skill Two\n"
+            f"{'Command line details. ' * 60}\n"
+        ),
+    )
+    course_b = _write(tmp_path / "course_b.md", "# Course B\nUnrelated review workflow.\n")
+    skill_dictionary = _write(
+        tmp_path / "skills.yaml",
+        """
+skills:
+  - id: python_basics
+    title: Python basics
+    aliases: [Python basics]
+  - id: cli_usage
+    title: Command line
+    aliases: [Command line]
+""",
+    )
+    assessments = _write(
+        tmp_path / "assessments.md",
+        (
+            "# Assessments\n"
+            "## Assessment A1\n"
+            "- Course: Course A\n"
+            "- Skill IDs: python_basics, cli_usage\n"
+            "Python basics command line assessment.\n"
+        ),
+    )
+    config = _write(
+        tmp_path / "config.yaml",
+        """
+preprocessing:
+  enabled: true
+  retrieval:
+    enabled: true
+    mode: keyword
+    top_k: 1
+  token_budget:
+    enabled: true
+    max_input_tokens: 2100
+    reserve_output_tokens: 300
+""",
+    )
+    payload = load_input_payload(
+        course_a=course_a,
+        course_b=course_b,
+        skill_dictionary=skill_dictionary,
+        assessments=assessments,
+        config=config,
+    )
+
+    with pytest.raises(PreprocessingBudgetError) as exc_info:
+        run_pipeline(payload, tmp_path / "outputs")
+
+    assert exc_info.value.code == "prompt_budget_exceeded_after_chunking"
+    assert called is False
 
 
 def test_relation_normalization_preserves_evidence_refs() -> None:
@@ -265,10 +546,16 @@ preprocessing:
 
     assert (tmp_path / "outputs" / "chunks_course_a.json").is_file()
     assert (tmp_path / "outputs" / "chunks_course_b.json").is_file()
+    assert (tmp_path / "outputs" / "selected_chunks.json").is_file()
     assert (tmp_path / "outputs" / "retrieved_pairs.json").is_file()
     assert (tmp_path / "outputs" / "preprocessing_summary.json").is_file()
     assert result_json["preprocessing"]["enabled"] is True
     assert result_json["preprocessing"]["metrics"]["retrieved_pairs"] <= 2
+    assert result_json["preprocessing"]["metrics"]["available_input_tokens"] > 0
+    assert result_json["preprocessing"]["metrics"]["prompt_overhead_tokens"] > 0
+    assert result_json["preprocessing"]["metrics"]["recommended_chunk_chars"] > 0
+    assert result_json["preprocessing"]["metrics"]["selected_chunks"] > 0
+    assert result_json["preprocessing"]["metrics"]["estimated_prompt_tokens"] > 0
 
 
 def _payload() -> dict[str, object]:
@@ -279,6 +566,7 @@ def _payload() -> dict[str, object]:
             "raw_text": _course_yaml(),
             "normalized_text": _course_yaml(),
             "parsed_data": {
+                "topics": ["Python basics"],
                 "modules": [
                     {
                         "id": "module_01",
@@ -323,6 +611,8 @@ def _payload() -> dict[str, object]:
 
 def _course_yaml() -> str:
     return """
+topics:
+  - Python basics
 modules:
   - id: module_01
     title: Python Basics
@@ -341,6 +631,208 @@ skills:
     aliases:
       - Python basics
 """
+
+
+def _unrelated_outcomes_payload() -> dict[str, object]:
+    payload = dict(_payload())
+    payload["course_a"] = {
+        "source_path": "course_a.yaml",
+        "format": "yaml",
+        "raw_text": "learning_outcomes:\n  - Читать простые наборы данных\n",
+        "normalized_text": "learning_outcomes:\n  - Читать простые наборы данных\n",
+        "parsed_data": {"learning_outcomes": ["Читать простые наборы данных"]},
+    }
+    payload["course_b"] = {
+        "source_path": "course_b.yaml",
+        "format": "yaml",
+        "raw_text": "learning_outcomes:\n  - Запускать локальные CLI-инструменты\n",
+        "normalized_text": "learning_outcomes:\n  - Запускать локальные CLI-инструменты\n",
+        "parsed_data": {"learning_outcomes": ["Запускать локальные CLI-инструменты"]},
+    }
+    payload["assessments"] = {
+        "source_path": "assessments.csv",
+        "format": "csv",
+        "raw_text": "title,skill\nБез совпадений,totally_different\n",
+        "normalized_text": "title,skill\nБез совпадений,totally_different",
+        "parsed_data": [{"title": "Без совпадений", "skill": "totally_different"}],
+    }
+    return payload
+
+
+def _course_id_assessments_payload() -> dict[str, object]:
+    payload = dict(_payload())
+    payload["course_a"] = {
+        "source_path": "course_a.yaml",
+        "format": "yaml",
+        "raw_text": "id: course_a\ntopics:\n  - Data processing\n",
+        "normalized_text": "id: course_a\ntopics:\n  - Data processing\n",
+        "parsed_data": {"id": "course_a", "topics": ["Data processing"]},
+    }
+    payload["course_b"] = {
+        "source_path": "course_b.yaml",
+        "format": "yaml",
+        "raw_text": "id: course_b\ntopics:\n  - Data processing\n",
+        "normalized_text": "id: course_b\ntopics:\n  - Data processing\n",
+        "parsed_data": {"id": "course_b", "topics": ["Data processing"]},
+    }
+    payload["skill_dictionary"] = {
+        "source_path": "skills.yaml",
+        "format": "yaml",
+        "raw_text": "skills:\n  - id: data_processing\n    title: Data processing\n",
+        "parsed_data": {
+            "skills": [
+                {
+                    "id": "data_processing",
+                    "title": "Data processing",
+                    "aliases": [],
+                }
+            ]
+        },
+    }
+    payload["assessments"] = {
+        "source_path": "assessments.csv",
+        "format": "csv",
+        "raw_text": (
+            "course_id,assessment_id,title,skill_id,type\n"
+            "course_a,a1,Course A data task,data_processing,project\n"
+            "course_b,b1,Course B data task,data_processing,project\n"
+        ),
+        "normalized_text": (
+            "course_id,assessment_id,title,skill_id,type\n"
+            "course_a,a1,Course A data task,data_processing,project\n"
+            "course_b,b1,Course B data task,data_processing,project\n"
+        ),
+        "parsed_data": [
+            {
+                "course_id": "course_a",
+                "assessment_id": "a1",
+                "title": "Course A data task",
+                "skill_id": "data_processing",
+                "type": "project",
+            },
+            {
+                "course_id": "course_b",
+                "assessment_id": "b1",
+                "title": "Course B data task",
+                "skill_id": "data_processing",
+                "type": "project",
+            },
+        ],
+    }
+    return payload
+
+
+def _markdown_assessment_support_payload() -> dict[str, object]:
+    payload = dict(_payload())
+    payload["course_a"] = {
+        "source_path": "course_a.md",
+        "format": "markdown",
+        "raw_text": (
+            "# Course A\n"
+            "## Branching\n"
+            "Students create feature branches and merge them back into main.\n"
+            "## Conflict Resolution\n"
+            "Students inspect conflict markers and resolve merge conflicts by preserving both useful changes.\n"
+        ),
+        "normalized_text": (
+            "# Course A\n"
+            "## Branching\n"
+            "Students create feature branches and merge them back into main.\n"
+            "## Conflict Resolution\n"
+            "Students inspect conflict markers and resolve merge conflicts by preserving both useful changes.\n"
+        ),
+    }
+    payload["course_b"] = {
+        "source_path": "course_b.md",
+        "format": "markdown",
+        "raw_text": (
+            "# Course B\n"
+            "## Pull Request Review\n"
+            "GitHub review workflow appears here, but it belongs to Course B and should not support Course A assessment.\n"
+        ),
+        "normalized_text": (
+            "# Course B\n"
+            "## Pull Request Review\n"
+            "GitHub review workflow appears here, but it belongs to Course B and should not support Course A assessment.\n"
+        ),
+    }
+    payload["skill_dictionary"] = {
+        "source_path": "skills.yaml",
+        "format": "yaml",
+        "raw_text": (
+            "skills:\n"
+            "  - id: git_branching\n"
+            "    title: Git branching\n"
+            "    aliases: [branching, feature branches]\n"
+            "  - id: git_merge_conflict_resolution\n"
+            "    title: Git merge conflict resolution\n"
+            "    aliases: [merge conflicts, conflict markers]\n"
+        ),
+        "parsed_data": {
+            "skills": [
+                {
+                    "id": "git_branching",
+                    "title": "Git branching",
+                    "aliases": ["branching", "feature branches"],
+                },
+                {
+                    "id": "git_merge_conflict_resolution",
+                    "title": "Git merge conflict resolution",
+                    "aliases": ["merge conflicts", "conflict markers"],
+                },
+            ]
+        },
+    }
+    payload["assessments"] = {
+        "source_path": "assessments.md",
+        "format": "markdown",
+        "raw_text": (
+            "# Assessments\n"
+            "## Assessment A2\n"
+            "- Course: Course A\n"
+            "- Skill IDs: git_branching, git_merge_conflict_resolution\n"
+            "Students create a feature branch and resolve a merge conflict.\n"
+        ),
+        "normalized_text": (
+            "# Assessments\n"
+            "## Assessment A2\n"
+            "- Course: Course A\n"
+            "- Skill IDs: git_branching, git_merge_conflict_resolution\n"
+            "Students create a feature branch and resolve a merge conflict.\n"
+        ),
+    }
+    return payload
+
+
+def _large_module_payload() -> dict[str, object]:
+    payload = dict(_payload())
+    long_description = " ".join(f"paragraph sentence {index}." for index in range(80))
+    payload["course_a"] = {
+        "source_path": "course_a.yaml",
+        "format": "yaml",
+        "raw_text": f"modules:\n  - id: module_01\n    title: Big Module\n    description: {long_description}\n",
+        "normalized_text": f"modules:\n  - id: module_01\n    title: Big Module\n    description: {long_description}\n",
+        "parsed_data": {
+            "modules": [
+                {
+                    "id": "module_01",
+                    "title": "Big Module",
+                    "description": long_description,
+                    "skills": ["python_basics"],
+                }
+            ]
+        },
+    }
+    return payload
+
+
+def _payload_with_raw_tail(tail: str) -> dict[str, object]:
+    payload = dict(_payload())
+    course_a = dict(payload["course_a"])  # type: ignore[arg-type]
+    course_a["raw_text"] = f"{course_a['raw_text']}\n{tail}\n"
+    course_a["normalized_text"] = f"{course_a['normalized_text']}\n{tail}\n"
+    payload["course_a"] = course_a
+    return payload
 
 
 def _write(path: Path, content: str) -> Path:

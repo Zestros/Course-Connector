@@ -116,7 +116,9 @@ def _format_confidence(value: Any) -> str:
         return "unknown"
 
 
-def _format_evidence_ref(evidence_ref: dict[str, Any]) -> str:
+def _format_evidence_ref(evidence_ref: Any) -> str:
+    if not isinstance(evidence_ref, dict):
+        return f"`{str(evidence_ref)}`"
     role = evidence_ref.get("source_role") or "unknown"
     source_type = evidence_ref.get("source_type") or "source"
     source_path = evidence_ref.get("source_path") or "unknown source"

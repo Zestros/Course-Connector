@@ -38,7 +38,9 @@ def build_prompt(
         course_b_text=context["course_b"]["text"],
         skill_dictionary_text=context["skill_dictionary"]["text"],
         assessments_text=context["assessments"]["text"],
+        selected_chunks_text=context.get("selected_chunks", {}).get("text", "[]"),
         retrieved_pairs_text=context.get("retrieved_pairs", {}).get("text", "[]"),
+        preprocessing_metrics_json=json.dumps(context.get("preprocessing_metrics", {}), ensure_ascii=False, indent=2),
         warnings_json=json.dumps(context["warnings"], ensure_ascii=False, indent=2),
     )
 

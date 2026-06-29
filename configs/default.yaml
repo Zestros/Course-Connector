@@ -5,19 +5,24 @@ relation_types:
   - probable_duplication
   - probable_gap
 llm:
-  provider: mock
-  model: openai/gpt-oss-120b:free
+  provider: openrouter
+  model: openrouter/free
   temperature: 0.0
   timeout_seconds: 60
   debug: false
   output_language: ru
   prompt_template: default_analysis_prompt.md
+  api_key_file: LLM_apikey/key.txt
 preprocessing:
-  enabled: true
+  enabled: false
   write_intermediate_outputs: true
   chunking:
     enabled: true
     strategy: educational_entities
+    sizing_mode: auto
+    min_chunk_tokens: 300
+    overlap_tokens: 80
+    strict: false
     max_chunk_chars: 900
     max_pair_text_chars: 160
   retrieval:
@@ -32,5 +37,5 @@ preprocessing:
     local_files_only: true
   token_budget:
     enabled: true
-    max_input_tokens: 80000
-    reserve_output_tokens: 8000
+    max_input_tokens: 13000
+    reserve_output_tokens: 1500

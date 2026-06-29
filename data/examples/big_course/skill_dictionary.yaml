@@ -1,0 +1,95 @@
+skills:
+  - id: git_repository_model
+    title: Git repository model
+    aliases:
+      - repository model
+      - working tree
+      - staging area
+      - commit graph
+      - Git history
+  - id: git_status_diff
+    title: Git status and diff
+    aliases:
+      - inspect changes
+      - staged diff
+      - review changes
+      - read diff
+  - id: git_commit_quality
+    title: Commit quality
+    aliases:
+      - commit message
+      - atomic commit
+      - logical commit
+      - history hygiene
+  - id: git_branching
+    title: Git branching
+    aliases:
+      - branch
+      - feature branch
+      - switch branch
+      - isolated work
+  - id: git_merge_conflict_resolution
+    title: Merge conflict resolution
+    aliases:
+      - merge conflict
+      - conflict markers
+      - resolve conflict
+      - merge commit
+  - id: git_restore_revert_reset
+    title: Restore, revert and reset
+    aliases:
+      - undo changes
+      - restore file
+      - revert commit
+      - reset branch
+  - id: github_remote_sync
+    title: GitHub remote synchronization
+    aliases:
+      - origin
+      - remote branch
+      - remote tracking branch
+      - synchronize repository
+  - id: github_issue_planning
+    title: GitHub issue planning
+    aliases:
+      - issue
+      - task description
+      - acceptance criteria
+      - backlog
+  - id: github_pull_request_workflow
+    title: Pull request workflow
+    aliases:
+      - PR
+      - pull request
+      - change proposal
+      - review request
+  - id: github_code_review
+    title: GitHub code review
+    aliases:
+      - review comment
+      - approve
+      - request changes
+      - diff discussion
+  - id: github_actions_ci
+    title: GitHub Actions CI
+    aliases:
+      - workflow
+      - status check
+      - failed check
+      - CI
+      - .github/workflows
+  - id: github_branch_protection
+    title: GitHub branch protection
+    aliases:
+      - protected branch
+      - required checks
+      - required review
+      - merge rules
+  - id: github_repository_security
+    title: GitHub repository security
+    aliases:
+      - API key
+      - repository secret
+      - token
+      - sensitive file
+      - secret rotation
