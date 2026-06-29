@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from course_connector.preprocessing_layer import PreprocessingConfig, prepare_an
 from course_connector.preprocessing_layer.config import (
     ChunkingConfig,
     EmbeddingsConfig,
+    PreprocessingConfigurationError,
     RetrievalConfig,
     TokenBudgetConfig,
 )
@@ -89,6 +91,75 @@ def test_local_embeddings_can_fallback_to_keyword_without_dependency() -> None:
 
     assert context["retrieved_pairs"]
     assert "Local embeddings unavailable; fell back to keyword retrieval." in context["warnings"]
+
+
+def test_local_embedding_provider_raises_clear_error_when_dependency_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)
+
+    with pytest.raises(PreprocessingConfigurationError, match="sentence-transformers"):
+        LocalSentenceTransformerEmbeddingProvider(EmbeddingsConfig(enabled=True))
+
+
+def test_local_embedding_provider_embeds_with_lazy_sentence_transformer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSentenceTransformer:
+        calls: list[tuple[str, bool]] = []
+
+        def __init__(self, model: str, local_files_only: bool = True) -> None:
+            self.calls.append((model, local_files_only))
+
+        def encode(
+            self,
+            texts: list[str],
+            convert_to_numpy: bool,
+            show_progress_bar: bool,
+        ) -> list[list[float]]:
+            assert texts == ["python", "cli"]
+            assert convert_to_numpy is False
+            assert show_progress_bar is False
+            return [[1, 2.5], [3, 4]]
+
+    fake_module = types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+
+    provider = LocalSentenceTransformerEmbeddingProvider(
+        EmbeddingsConfig(enabled=True, model="local-model", local_files_only=False)
+    )
+
+    assert provider.embed(["python", "cli"]) == [[1.0, 2.5], [3.0, 4.0]]
+    assert FakeSentenceTransformer.calls == [("local-model", False)]
+
+
+def test_local_embedding_provider_retries_when_constructor_does_not_accept_local_files_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSentenceTransformer:
+        calls: list[tuple[str, object]] = []
+
+        def __init__(self, model: str, **kwargs: object) -> None:
+            if "local_files_only" in kwargs:
+                self.calls.append((model, kwargs["local_files_only"]))
+                raise TypeError("unexpected keyword")
+            self.calls.append((model, "fallback"))
+
+        def encode(
+            self,
+            texts: list[str],
+            convert_to_numpy: bool,
+            show_progress_bar: bool,
+        ) -> list[list[float]]:
+            return [[0]]
+
+    fake_module = types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+
+    provider = LocalSentenceTransformerEmbeddingProvider(EmbeddingsConfig(enabled=True, model="legacy-model"))
+
+    assert provider.embed(["text"]) == [[0.0]]
+    assert FakeSentenceTransformer.calls == [("legacy-model", True), ("legacy-model", "fallback")]
 
 
 @pytest.mark.skipif(

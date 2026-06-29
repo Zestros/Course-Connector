@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,7 @@ from course_connector.llm_layer import (
 )
 from course_connector.llm_layer.parsing import normalize_relations, parse_provider_response
 from course_connector.llm_layer.providers.factory import create_provider
+from course_connector.llm_layer.providers import openrouter_provider as openrouter_module
 from course_connector.llm_layer.providers.openrouter_provider import OpenRouterProvider
 
 
@@ -287,7 +289,11 @@ def test_openrouter_key_prefers_environment_and_is_not_metadata(
     assert "env-key" not in repr(provider)
 
 
-def test_openrouter_missing_key_error_does_not_expose_secret_path(tmp_path: Path) -> None:
+def test_openrouter_missing_key_error_does_not_expose_secret_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     config = LLMConfig(provider="openrouter", api_key_file=tmp_path / "missing-key.txt")
 
     with pytest.raises(LLMConfigurationError) as exc_info:
@@ -295,6 +301,103 @@ def test_openrouter_missing_key_error_does_not_expose_secret_path(tmp_path: Path
 
     assert "missing-key.txt" not in str(exc_info.value)
     assert "OPENROUTER_API_KEY" in str(exc_info.value)
+
+
+def test_openrouter_generate_posts_prompt_and_extracts_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"choices": [{"message": {"content": "provider text"}}]}).encode("utf-8")
+
+    def fake_urlopen(request: object, timeout: float) -> FakeResponse:
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(openrouter_module.urllib.request, "urlopen", fake_urlopen)
+
+    response = OpenRouterProvider(
+        LLMConfig(provider="openrouter", model="test-model", timeout_seconds=12)
+    ).generate("hello prompt")
+
+    request = captured["request"]
+    payload = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+    assert payload["model"] == "test-model"
+    assert payload["messages"][0]["content"] == "hello prompt"
+    assert request.get_header("Authorization") == "Bearer test-key"  # type: ignore[attr-defined]
+    assert captured["timeout"] == 12
+    assert response.text == "provider text"
+    assert response.metadata == {"provider": "openrouter", "mode": "api", "model": "test-model"}
+
+
+@pytest.mark.parametrize(
+    ("response_data", "message"),
+    [
+        ({}, "did not include choices"),
+        ({"choices": []}, "did not include choices"),
+        ({"choices": ["bad"]}, "choice was not an object"),
+        ({"choices": [{}]}, "did not include a message"),
+        ({"choices": [{"message": {}}]}, "did not include text content"),
+    ],
+)
+def test_openrouter_extract_text_rejects_malformed_responses(
+    response_data: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(RuntimeError, match=message):
+        openrouter_module._extract_text(response_data)
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            urllib.error.HTTPError(url="", code=429, msg="Too Many Requests", hdrs=None, fp=None),
+            "HTTP 429",
+        ),
+        (urllib.error.URLError("dns failed"), "before receiving a response"),
+        (TimeoutError("slow"), "timed out"),
+    ],
+)
+def test_openrouter_generate_wraps_transport_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    message: str,
+) -> None:
+    def fake_urlopen(request: object, timeout: float) -> object:
+        raise error
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(openrouter_module.urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match=message):
+        OpenRouterProvider(LLMConfig(provider="openrouter")).generate("prompt")
+
+
+def test_openrouter_generate_rejects_non_json_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"not json"
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(openrouter_module.urllib.request, "urlopen", lambda request, timeout: FakeResponse())
+
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        OpenRouterProvider(LLMConfig(provider="openrouter")).generate("prompt")
 
 
 def _openrouter_key_file() -> Path:
