@@ -1,5 +1,10 @@
 id: data_literacy_basics
 title: Основы аналитики данных
+description: Курс формирует базовую грамотность в чтении, очистке и объяснении небольших табличных наборов данных.
+topics:
+  - Таблицы и типы данных
+  - Очистка и первичный анализ
+  - Короткий аналитический отчет
 modules:
   - id: module_01
     title: Таблицы и типы данных
@@ -28,15 +33,27 @@ learning_outcomes:
     text: Формулировать exploratory_questions перед расчетом метрик.
   - id: lo_04
     text: Писать короткий отчет с выводами и ограничениями анализа.
+    skills:
+      - report_writing
+      - result_explanation
+competencies:
+  - data_table_reading
+  - data_types_missing
+  - data_cleaning
+  - exploratory_questions
+  - report_writing
+  - result_explanation
 assessments:
   - id: quiz_01
     title: Мини-тест по структуре данных
     checked_skills:
       - data_table_reading
       - data_types_missing
+    evidence: Ответы студента показывают умение распознавать структуру таблицы, типы данных и пропуски.
   - id: report_01
     title: Короткий отчет по учебному датасету
     checked_skills:
       - data_cleaning
       - report_writing
       - result_explanation
+    evidence: Студент сдает Markdown-отчет с описанием очистки, выводами и ограничениями данных.

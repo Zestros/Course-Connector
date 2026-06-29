@@ -1,9 +1,35 @@
 id: course_b
 title: Проектная автоматизация отчетов
+description: Курс учит запускать локальные CLI-инструменты, проверять входные файлы и автоматизировать подготовку отчетов.
 topics:
   - CLI tools
   - File validation
   - Automation
+modules:
+  - id: module_01
+    title: CLI tools
+    description: Студенты запускают локальные инструменты и читают вывод командной строки.
+    skills:
+      - cli_tools
+  - id: module_02
+    title: File validation
+    description: Студенты проверяют наличие и формат входных файлов перед обработкой.
+    skills:
+      - file_validation
 learning_outcomes:
-  - Запускать локальные CLI-инструменты
-  - Проверять входные файлы перед обработкой
+  - text: Запускать локальные CLI-инструменты.
+    skills:
+      - cli_tools
+  - text: Проверять входные файлы перед обработкой.
+    skills:
+      - file_validation
+competencies:
+  - cli_tools
+  - file_validation
+assessments:
+  - id: cli_task_01
+    title: CLI-проверка входных файлов
+    checked_skills:
+      - cli_tools
+      - file_validation
+    evidence: Студент предоставляет лог запуска CLI и результат проверки входных файлов.

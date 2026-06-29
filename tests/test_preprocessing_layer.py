@@ -388,8 +388,8 @@ def test_pipeline_rejects_oversized_legacy_prompt_before_provider(
         return {"status": "completed", "relations": [], "warnings": []}
 
     monkeypatch.setattr("course_connector.pipeline.analyze_courses", fake_analyze_courses)
-    course_a = _write(tmp_path / "course_a.md", "# A\n" + ("very long text " * 300))
-    course_b = _write(tmp_path / "course_b.md", "# B\n" + ("another long text " * 300))
+    course_a = _write(tmp_path / "course_a.md", _valid_course_markdown("A", "python_basics", "very long text " * 300))
+    course_b = _write(tmp_path / "course_b.md", _valid_course_markdown("B", "python_basics", "another long text " * 300))
     skill_dictionary = _write(tmp_path / "skills.yaml", _skills_yaml())
     assessments = _write(tmp_path / "assessments.csv", "title,skill\nCLI task,python_basics\n")
     config = _write(
@@ -434,15 +434,22 @@ def test_pipeline_rejects_oversized_prompt_with_assessment_support(
         tmp_path / "course_a.md",
         (
             "# Course A\n"
-            "## Intro\n"
+            "## Description\n"
             "Python basics introduction.\n"
-            "## Skill One\n"
+            "## Topics\n"
+            "Python basics introduction.\n"
+            "## Learning Outcomes\n"
             f"{'Python basics details. ' * 60}\n"
-            "## Skill Two\n"
+            "## Competencies\n"
+            "- python_basics\n"
+            "- cli_usage\n"
+            "## Assessments\n"
+            "- Course A assessment checks python_basics and cli_usage.\n"
+            "## Evidence\n"
             f"{'Command line details. ' * 60}\n"
         ),
     )
-    course_b = _write(tmp_path / "course_b.md", "# Course B\nUnrelated review workflow.\n")
+    course_b = _write(tmp_path / "course_b.md", _valid_course_markdown("Course B", "python_basics", "Unrelated review workflow."))
     skill_dictionary = _write(
         tmp_path / "skills.yaml",
         """
@@ -476,7 +483,7 @@ preprocessing:
     top_k: 1
   token_budget:
     enabled: true
-    max_input_tokens: 2100
+    max_input_tokens: 1100
     reserve_output_tokens: 300
 """,
     )
@@ -518,7 +525,7 @@ def test_relation_normalization_preserves_evidence_refs() -> None:
 
 def test_pipeline_writes_preprocessing_outputs_when_enabled(tmp_path: Path) -> None:
     course_a = _write(tmp_path / "course_a.yaml", _course_yaml())
-    course_b = _write(tmp_path / "course_b.md", "# Course B\nPython basics in CLI tasks.\n")
+    course_b = _write(tmp_path / "course_b.md", _valid_course_markdown("Course B", "python_basics", "Python basics in CLI tasks."))
     skill_dictionary = _write(tmp_path / "skills.yaml", _skills_yaml())
     assessments = _write(tmp_path / "assessments.csv", "title,skill\nCLI task,python_basics\n")
     config = _write(
@@ -611,15 +618,28 @@ def _payload() -> dict[str, object]:
 
 def _course_yaml() -> str:
     return """
+title: Course A
+description: Course A teaches Python basics.
 topics:
   - Python basics
 modules:
   - id: module_01
     title: Python Basics
+    description: Python basics module.
     skills:
       - python_basics
 learning_outcomes:
   - text: Use python_basics in small programs.
+    skills:
+      - python_basics
+competencies:
+  - python_basics
+assessments:
+  - id: assessment_01
+    title: Python basics task
+    checked_skills:
+      - python_basics
+    evidence: Student submits a Python basics task.
 """
 
 
@@ -838,3 +858,32 @@ def _payload_with_raw_tail(tail: str) -> dict[str, object]:
 def _write(path: Path, content: str) -> Path:
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def _valid_course_markdown(title: str, skill_id: str, extra_text: str = "") -> str:
+    return f"""# {title}
+
+## Description
+
+Course description with {skill_id}. {extra_text}
+
+## Topics
+
+- Python basics
+
+## Learning Outcomes
+
+- Use {skill_id} in a practical task.
+
+## Competencies
+
+- {skill_id}
+
+## Assessments
+
+- Task checks {skill_id}.
+
+## Evidence
+
+- Student submits evidence for {skill_id}. {extra_text}
+"""
