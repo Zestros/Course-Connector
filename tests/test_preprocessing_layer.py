@@ -61,6 +61,20 @@ def test_chunking_creates_source_locators_for_yaml_markdown_and_csv() -> None:
     assert "python_basics" in course_chunk["skill_ids"]
 
 
+def test_yaml_course_topics_are_chunked_as_educational_entities() -> None:
+    context = prepare_analysis_context(
+        _payload(),
+        config=PreprocessingConfig(enabled=True, retrieval=RetrievalConfig(enabled=False, mode="none")),
+    )
+
+    topics = [chunk for chunk in context["chunks"]["course_a"] if chunk["source_type"] == "topic"]
+
+    assert topics
+    assert topics[0]["title"] == "Python basics"
+    assert topics[0]["locator"] == {"kind": "object_path", "object_path": "topics[0]"}
+    assert topics[0]["skill_ids"] == ["python_basics"]
+
+
 def test_keyword_retrieval_returns_balanced_top_k_pairs_with_refs() -> None:
     context = prepare_analysis_context(
         _payload(),
@@ -77,6 +91,18 @@ def test_keyword_retrieval_returns_balanced_top_k_pairs_with_refs() -> None:
     assert pairs[0]["candidate_relation_hint"]
     assert pairs[0]["evidence_refs"]
     assert context["metrics"]["retrieved_pairs"] == len(pairs)
+
+
+def test_keyword_retrieval_ignores_unrelated_generated_outcome_positions() -> None:
+    context = prepare_analysis_context(
+        _unrelated_outcomes_payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=3),
+        ),
+    )
+
+    assert context["retrieved_pairs"] == []
 
 
 def test_local_embeddings_can_fallback_to_keyword_without_dependency() -> None:
@@ -279,6 +305,7 @@ def _payload() -> dict[str, object]:
             "raw_text": _course_yaml(),
             "normalized_text": _course_yaml(),
             "parsed_data": {
+                "topics": ["Python basics"],
                 "modules": [
                     {
                         "id": "module_01",
@@ -323,6 +350,8 @@ def _payload() -> dict[str, object]:
 
 def _course_yaml() -> str:
     return """
+topics:
+  - Python basics
 modules:
   - id: module_01
     title: Python Basics
@@ -341,6 +370,32 @@ skills:
     aliases:
       - Python basics
 """
+
+
+def _unrelated_outcomes_payload() -> dict[str, object]:
+    payload = dict(_payload())
+    payload["course_a"] = {
+        "source_path": "course_a.yaml",
+        "format": "yaml",
+        "raw_text": "learning_outcomes:\n  - Читать простые наборы данных\n",
+        "normalized_text": "learning_outcomes:\n  - Читать простые наборы данных\n",
+        "parsed_data": {"learning_outcomes": ["Читать простые наборы данных"]},
+    }
+    payload["course_b"] = {
+        "source_path": "course_b.yaml",
+        "format": "yaml",
+        "raw_text": "learning_outcomes:\n  - Запускать локальные CLI-инструменты\n",
+        "normalized_text": "learning_outcomes:\n  - Запускать локальные CLI-инструменты\n",
+        "parsed_data": {"learning_outcomes": ["Запускать локальные CLI-инструменты"]},
+    }
+    payload["assessments"] = {
+        "source_path": "assessments.csv",
+        "format": "csv",
+        "raw_text": "title,skill\nБез совпадений,totally_different\n",
+        "normalized_text": "title,skill\nБез совпадений,totally_different",
+        "parsed_data": [{"title": "Без совпадений", "skill": "totally_different"}],
+    }
+    return payload
 
 
 def _write(path: Path, content: str) -> Path:

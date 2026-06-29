@@ -162,12 +162,14 @@ def _keyword_score(chunk_a: dict[str, Any], chunk_b: dict[str, Any]) -> float:
     keywords_a = set(chunk_a.get("keywords", []))
     keywords_b = set(chunk_b.get("keywords", []))
     title_score = 0.2 if chunk_a.get("title") and chunk_a.get("title") == chunk_b.get("title") else 0.0
-    return (
+    base_score = (
         len(skills_a & skills_b) * 1.0
         + len(keywords_a & keywords_b) * 0.15
         + title_score
-        + _source_type_bonus(chunk_a, chunk_b)
     )
+    if base_score <= 0:
+        return 0.0
+    return base_score + _source_type_bonus(chunk_a, chunk_b)
 
 
 def _source_type_bonus(chunk_a: dict[str, Any], chunk_b: dict[str, Any]) -> float:

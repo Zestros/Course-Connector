@@ -57,6 +57,23 @@ def _course_yaml_chunks(
     warnings: list[str],
 ) -> list[dict[str, Any]]:
     chunks: list[dict[str, Any]] = []
+    topics = data.get("topics") if isinstance(data.get("topics"), list) else []
+    for index, topic in enumerate(topics, start=1):
+        text = str(topic.get("title") if isinstance(topic, dict) else topic)
+        skills = _infer_skill_ids(text, skill_index)
+        chunks.append(_chunk(
+            role=role,
+            entry=entry,
+            chunk_id=f"{role}_topic_{index:02d}",
+            source_type="topic",
+            parent_id=None,
+            title=text,
+            text=text,
+            skill_ids=skills,
+            locator=object_path_locator(f"topics[{index - 1}]"),
+            config=config,
+        ))
+
     modules = data.get("modules") if isinstance(data.get("modules"), list) else []
     for index, module in enumerate(modules, start=1):
         if not isinstance(module, dict):
@@ -92,7 +109,7 @@ def _course_yaml_chunks(
             chunk_id=f"{role}_outcome_{index:02d}",
             source_type="outcome",
             parent_id=None,
-            title=f"Learning outcome {index}",
+            title=_clip(_compact_text(text), 80),
             text=text,
             skill_ids=skills,
             locator=object_path_locator(f"learning_outcomes[{index - 1}]"),
