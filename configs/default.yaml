@@ -14,7 +14,7 @@ llm:
   prompt_template: default_analysis_prompt.md
   api_key_file: LLM_apikey/key.txt
 preprocessing:
-  enabled: true
+  enabled: false
   write_intermediate_outputs: true
   chunking:
     enabled: true
