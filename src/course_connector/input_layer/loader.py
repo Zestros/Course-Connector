@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,14 @@ class InputRole:
 
 
 TEXT_ROLES = {"course_a", "course_b", "assessments"}
+REQUIRED_MARKDOWN_SECTIONS = {
+    "description": ("description", "описание"),
+    "topics": ("topics", "темы"),
+    "learning_outcomes": ("learning outcomes", "learning_outcomes", "результаты обучения"),
+    "competencies": ("competencies", "компетенции"),
+    "assessments": ("assessments", "оценивание", "задания"),
+    "evidence": ("evidence", "доказательства", "свидетельства"),
+}
 
 
 def load_input_payload(
@@ -49,6 +58,7 @@ def load_input_payload(
     payload: dict[str, Any] = {"warnings": warnings}
     for role in roles:
         payload[role.name] = _load_role(role, warnings)
+    _validate_input_payload(payload)
     return payload
 
 
@@ -159,3 +169,180 @@ def _normalize_text(text: str) -> str:
         if blank_count <= 2:
             collapsed.append("")
     return "\n".join(collapsed).strip()
+
+
+def _validate_input_payload(payload: dict[str, Any]) -> None:
+    skill_ids = _skill_dictionary_ids(payload.get("skill_dictionary"))
+    errors: list[str] = []
+    if not skill_ids:
+        errors.append("Input `skill_dictionary` must define at least one skill with `id`.")
+    for role in ("course_a", "course_b"):
+        errors.extend(_validate_course_entry(role, payload.get(role), skill_ids))
+    errors.extend(_validate_assessment_input(payload.get("assessments"), skill_ids))
+    if errors:
+        bullet_list = "\n".join(f"- {error}" for error in errors)
+        raise InputLayerError(f"Input preflight validation failed:\n{bullet_list}")
+
+
+def _skill_dictionary_ids(entry: Any) -> set[str]:
+    if not isinstance(entry, dict):
+        return set()
+    parsed = entry.get("parsed_data")
+    if not isinstance(parsed, dict):
+        return set()
+    skills = parsed.get("skills")
+    if not isinstance(skills, list):
+        return set()
+    return {
+        str(skill.get("id")).strip()
+        for skill in skills
+        if isinstance(skill, dict) and str(skill.get("id") or "").strip()
+    }
+
+
+def _validate_course_entry(role: str, entry: Any, skill_ids: set[str]) -> list[str]:
+    if not isinstance(entry, dict):
+        return [f"Input `{role}` must be provided."]
+    if entry.get("format") == "yaml":
+        return _validate_yaml_course(role, entry, skill_ids)
+    if entry.get("format") == "markdown":
+        return _validate_markdown_course(role, entry, skill_ids)
+    return [f"Input `{role}` must be a Markdown or YAML course file."]
+
+
+def _validate_yaml_course(role: str, entry: dict[str, Any], skill_ids: set[str]) -> list[str]:
+    data = entry.get("parsed_data")
+    if not isinstance(data, dict):
+        return [f"Input `{role}` YAML course must be an object."]
+
+    errors: list[str] = []
+    for field in ("title", "description"):
+        if not _has_text(data.get(field)):
+            errors.append(f"Input `{role}` must include non-empty `{field}`.")
+    for field in ("topics", "learning_outcomes", "assessments"):
+        if not _has_non_empty_list(data.get(field)):
+            errors.append(f"Input `{role}` must include non-empty `{field}`.")
+
+    referenced_skills = _course_skill_refs(data)
+    if not _has_non_empty_list(data.get("competencies")) and not referenced_skills:
+        errors.append(
+            f"Input `{role}` must include `competencies` or skill links in modules/outcomes/assessments."
+        )
+    if not _course_has_evidence(data):
+        errors.append(f"Input `{role}` must include evidence in `evidence` or assessment evidence fields.")
+
+    missing_skill_ids = sorted(referenced_skills - skill_ids)
+    if missing_skill_ids:
+        errors.append(
+            f"Input `{role}` references unknown skill ids: {', '.join(missing_skill_ids)}."
+        )
+    if skill_ids and not referenced_skills:
+        errors.append(f"Input `{role}` must link at least one course item to a known skill id.")
+    elif skill_ids and not (referenced_skills & skill_ids):
+        errors.append(f"Input `{role}` must reference at least one skill from `skill_dictionary`.")
+    return errors
+
+
+def _validate_markdown_course(role: str, entry: dict[str, Any], skill_ids: set[str]) -> list[str]:
+    text = str(entry.get("normalized_text") or entry.get("raw_text") or "")
+    errors: list[str] = []
+    if not re.search(r"(?m)^#\s+\S+", text):
+        errors.append(f"Input `{role}` Markdown course must start with a title heading.")
+    headings = _markdown_headings(text)
+    for field, aliases in REQUIRED_MARKDOWN_SECTIONS.items():
+        if not any(alias in headings for alias in aliases):
+            errors.append(f"Input `{role}` Markdown course must include a `{field}` section.")
+
+    referenced_skills = {skill_id for skill_id in skill_ids if re.search(rf"\b{re.escape(skill_id)}\b", text)}
+    if skill_ids and not referenced_skills:
+        errors.append(f"Input `{role}` Markdown course must mention at least one skill id from `skill_dictionary`.")
+    return errors
+
+
+def _validate_assessment_input(entry: Any, skill_ids: set[str]) -> list[str]:
+    if not isinstance(entry, dict):
+        return ["Input `assessments` must be provided."]
+    if entry.get("format") == "csv":
+        rows = entry.get("parsed_data")
+        if not isinstance(rows, list) or not rows:
+            return ["Input `assessments` CSV must include at least one assessment row."]
+        referenced = {
+            value
+            for row in rows
+            if isinstance(row, dict)
+            for value in _skill_values(row)
+        }
+        if skill_ids and not (referenced & skill_ids):
+            return ["Input `assessments` must reference at least one skill id from `skill_dictionary`."]
+    elif not _has_text(entry.get("raw_text")):
+        return ["Input `assessments` must include assessment evidence text."]
+    return []
+
+
+def _course_skill_refs(data: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for key in ("skills", "skill_ids", "checked_skills", "competencies"):
+        refs.update(_string_values(data.get(key)))
+    for collection_name in ("topics", "modules", "learning_outcomes", "assessments", "evidence"):
+        collection = data.get(collection_name)
+        if not isinstance(collection, list):
+            continue
+        for item in collection:
+            if isinstance(item, dict):
+                for key in ("skills", "skill_ids", "skill_id", "checked_skills", "competencies", "competency_ids"):
+                    refs.update(_string_values(item.get(key)))
+    return refs
+
+
+def _course_has_evidence(data: dict[str, Any]) -> bool:
+    if _has_non_empty_list(data.get("evidence")) or _has_text(data.get("evidence")):
+        return True
+    assessments = data.get("assessments")
+    if not isinstance(assessments, list):
+        return False
+    for assessment in assessments:
+        if isinstance(assessment, dict) and (
+            _has_text(assessment.get("evidence"))
+            or _has_text(assessment.get("description"))
+            or _has_text(assessment.get("task"))
+            or _has_text(assessment.get("rubric"))
+        ):
+            return True
+    return False
+
+
+def _skill_values(row: dict[str, Any]) -> set[str]:
+    values: set[str] = set()
+    for key in ("skill_id", "skill", "skills", "skill_ids", "checked_skills", "competency_id", "competencies"):
+        values.update(_string_values(row.get(key)))
+    return values
+
+
+def _string_values(value: Any) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, list):
+        return {item for element in value for item in _string_values(element)}
+    if isinstance(value, dict):
+        return {item for element in value.values() for item in _string_values(element)}
+    return {
+        part.strip()
+        for part in re.split(r"[,;\s]+", str(value))
+        if part.strip()
+    }
+
+
+def _has_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _has_non_empty_list(value: Any) -> bool:
+    return isinstance(value, list) and bool(value)
+
+
+def _markdown_headings(text: str) -> set[str]:
+    headings = set()
+    for match in re.finditer(r"(?m)^#{2,6}\s+(.+?)\s*$", text):
+        heading = re.sub(r"[_-]+", " ", match.group(1).strip().lower())
+        headings.add(heading)
+    return headings

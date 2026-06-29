@@ -15,10 +15,10 @@ from course_connector.cli import main
 
 
 def test_run_command_creates_expected_outputs(tmp_path: Path) -> None:
-    course_a = _write(tmp_path / "course_a.md", "# Course A\n")
-    course_b = _write(tmp_path / "course_b.yaml", "title: Course B\n")
-    skill_dictionary = _write(tmp_path / "skill_dictionary.yaml", "skills: []\n")
-    assessments = _write(tmp_path / "assessments.csv", "course_id,title\ncourse_b,CLI task\n")
+    course_a = _write(tmp_path / "course_a.md", _valid_course_markdown("Course A", "cli_tools"))
+    course_b = _write(tmp_path / "course_b.yaml", _valid_course_yaml("Course B", "cli_tools"))
+    skill_dictionary = _write(tmp_path / "skill_dictionary.yaml", _valid_skill_dictionary("cli_tools"))
+    assessments = _write(tmp_path / "assessments.csv", "course_id,title,skill_id\ncourse_b,CLI task,cli_tools\n")
     config = _write(tmp_path / "config.yaml", "include_summary: true\n")
     output_dir = tmp_path / "outputs"
 
@@ -58,10 +58,10 @@ def test_run_command_creates_expected_outputs(tmp_path: Path) -> None:
 
 
 def test_run_command_allows_omitted_config(tmp_path: Path) -> None:
-    course_a = _write(tmp_path / "course_a.md", "# Course A\n")
-    course_b = _write(tmp_path / "course_b.yaml", "title: Course B\n")
-    skill_dictionary = _write(tmp_path / "skill_dictionary.yaml", "skills: []\n")
-    assessments = _write(tmp_path / "assessments.md", "# Assessments\n")
+    course_a = _write(tmp_path / "course_a.md", _valid_course_markdown("Course A", "cli_tools"))
+    course_b = _write(tmp_path / "course_b.yaml", _valid_course_yaml("Course B", "cli_tools"))
+    skill_dictionary = _write(tmp_path / "skill_dictionary.yaml", _valid_skill_dictionary("cli_tools"))
+    assessments = _write(tmp_path / "assessments.md", "# Assessments\n\nCLI task checks cli_tools.\n")
     output_dir = tmp_path / "outputs"
 
     exit_code = main(
@@ -149,6 +149,42 @@ def test_run_command_errors_when_config_is_missing(
     assert "Input `config` file not found" in capsys.readouterr().err
 
 
+def test_run_command_stops_before_pipeline_when_course_template_is_invalid(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fake_run_pipeline(*args: object, **kwargs: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("pipeline should not run for invalid input")
+
+    monkeypatch.setattr("course_connector.cli.run_pipeline", fake_run_pipeline)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "run",
+                "--course-a",
+                str(_write(tmp_path / "course_a.md", "# Course A\n")),
+                "--course-b",
+                str(_write(tmp_path / "course_b.yaml", _valid_course_yaml("Course B", "cli_tools"))),
+                "--skill-dictionary",
+                str(_write(tmp_path / "skill_dictionary.yaml", _valid_skill_dictionary("cli_tools"))),
+                "--assessments",
+                str(_write(tmp_path / "assessments.csv", "course_id,title,skill_id\ncourse_b,CLI task,cli_tools\n")),
+                "--output-dir",
+                str(tmp_path / "outputs"),
+            ]
+        )
+
+    assert exc_info.value.code == 2
+    assert called is False
+    assert "Input preflight validation failed" in capsys.readouterr().err
+
+
 def test_run_command_errors_when_extension_is_unsupported(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -184,3 +220,67 @@ def test_run_command_errors_when_extension_is_unsupported(
 def _write(path: Path, content: str) -> Path:
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def _valid_skill_dictionary(skill_id: str) -> str:
+    return f"""
+skills:
+  - id: {skill_id}
+    title: {skill_id}
+"""
+
+
+def _valid_course_yaml(title: str, skill_id: str) -> str:
+    return f"""
+title: {title}
+description: Course description.
+topics:
+  - CLI tools
+learning_outcomes:
+  - text: Use {skill_id} in a practical task.
+    skills:
+      - {skill_id}
+competencies:
+  - {skill_id}
+modules:
+  - id: module_01
+    title: Module
+    description: Module description.
+    skills:
+      - {skill_id}
+assessments:
+  - id: assessment_01
+    title: CLI task
+    checked_skills:
+      - {skill_id}
+    evidence: Student submits a working CLI run log.
+"""
+
+
+def _valid_course_markdown(title: str, skill_id: str) -> str:
+    return f"""# {title}
+
+## Description
+
+Course description with {skill_id}.
+
+## Topics
+
+- CLI tools
+
+## Learning Outcomes
+
+- Use {skill_id} in a practical task.
+
+## Competencies
+
+- {skill_id}
+
+## Assessments
+
+- CLI task checks {skill_id}.
+
+## Evidence
+
+- Student submits a working CLI run log for {skill_id}.
+"""
