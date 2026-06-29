@@ -61,7 +61,7 @@ def _course_yaml_chunks(
     for index, topic in enumerate(topics, start=1):
         text = str(topic.get("title") if isinstance(topic, dict) else topic)
         skills = _infer_skill_ids(text, skill_index)
-        chunks.append(_chunk(
+        chunks.extend(_entity_chunks(
             role=role,
             entry=entry,
             chunk_id=f"{role}_topic_{index:02d}",
@@ -86,7 +86,7 @@ def _course_yaml_chunks(
             str(module.get("description") or ""),
             " ".join(_skill_titles(skills, skill_index)),
         ]))
-        chunks.append(_chunk(
+        chunks.extend(_entity_chunks(
             role=role,
             entry=entry,
             chunk_id=f"{role}_{module_id}",
@@ -103,7 +103,7 @@ def _course_yaml_chunks(
     for index, outcome in enumerate(outcomes, start=1):
         text = str(outcome.get("text") if isinstance(outcome, dict) else outcome)
         skills = _infer_skill_ids(text, skill_index)
-        chunks.append(_chunk(
+        chunks.extend(_entity_chunks(
             role=role,
             entry=entry,
             chunk_id=f"{role}_outcome_{index:02d}",
@@ -123,7 +123,7 @@ def _course_yaml_chunks(
         title = str(assessment.get("title") or assessment.get("id") or f"assessment_{index:02d}")
         skills = _valid_skill_ids(assessment.get("checked_skills") or assessment.get("skills") or [], skill_index)
         text = _compact_text(f"{title} {' '.join(_skill_titles(skills, skill_index))}")
-        chunks.append(_chunk(
+        chunks.extend(_entity_chunks(
             role=role,
             entry=entry,
             chunk_id=f"{role}_assessment_{index:02d}",
@@ -158,7 +158,7 @@ def _assessment_chunks(
         for index, row in enumerate(rows, start=1):
             text = _compact_text(" ".join(str(value or "") for value in row.values()))
             title = str(row.get("title") or row.get("name") or f"Assessment row {index}")
-            chunks.append(_chunk(
+            chunks.extend(_entity_chunks(
                 role="assessments",
                 entry=entry,
                 chunk_id=f"assessments_row_{index:03d}",
@@ -190,7 +190,7 @@ def _structured_assessment_chunks(
     for index, item in enumerate(items, start=1):
         text = _compact_text(str(item))
         title = str(item.get("title") or f"Assessment {index}") if isinstance(item, dict) else f"Assessment {index}"
-        chunks.append(_chunk(
+        chunks.extend(_entity_chunks(
             role="assessments",
             entry=entry,
             chunk_id=f"assessments_item_{index:03d}",
@@ -217,7 +217,7 @@ def _markdown_chunks(
     chunks = []
     for index, section in enumerate(sections, start=1):
         title = section["title"] or f"{role} section {index}"
-        chunks.append(_chunk(
+        chunks.extend(_entity_chunks(
             role=role,
             entry=entry,
             chunk_id=f"{role}_section_{index:03d}",
@@ -243,7 +243,7 @@ def _skill_chunks(
     for index, (skill_id, skill) in enumerate(skill_index.items(), start=1):
         title = str(skill.get("title") or skill_id)
         text = _compact_text(" ".join([skill_id, title, " ".join(skill.get("aliases", []))]))
-        chunks.append(_chunk(
+        chunks.extend(_entity_chunks(
             role="skill_dictionary",
             entry=entry,
             chunk_id=f"skill_{skill_id}",
@@ -270,9 +270,11 @@ def _chunk(
     skill_ids: list[str],
     locator: dict[str, Any],
     config: ChunkingConfig,
+    chunk_index: int | None = None,
+    split_strategy: str | None = None,
 ) -> dict[str, Any]:
     clean_text = _clip(_compact_text(text or title), config.max_chunk_chars)
-    return {
+    item = {
         "chunk_id": _safe_id(chunk_id),
         "source_role": role,
         "source_path": entry.get("source_path"),
@@ -285,6 +287,60 @@ def _chunk(
         "keywords": _keywords(f"{title} {clean_text} {' '.join(skill_ids)}"),
         "locator": locator,
     }
+    if chunk_index is not None:
+        item["chunk_index"] = chunk_index
+    if split_strategy is not None:
+        item["split_strategy"] = split_strategy
+    return item
+
+
+def _entity_chunks(
+    *,
+    role: str,
+    entry: dict[str, Any],
+    chunk_id: str,
+    source_type: str,
+    parent_id: str | None,
+    title: str,
+    text: str,
+    skill_ids: list[str],
+    locator: dict[str, Any],
+    config: ChunkingConfig,
+) -> list[dict[str, Any]]:
+    compact = _compact_text(text or title)
+    if len(compact) <= config.max_chunk_chars:
+        return [_chunk(
+            role=role,
+            entry=entry,
+            chunk_id=chunk_id,
+            source_type=source_type,
+            parent_id=parent_id,
+            title=title,
+            text=compact,
+            skill_ids=skill_ids,
+            locator=locator,
+            config=config,
+        )]
+
+    parent_chunk_id = _safe_id(chunk_id)
+    parts = _split_large_text(compact, config.max_chunk_chars, config.overlap_tokens * 3)
+    return [
+        _chunk(
+            role=role,
+            entry=entry,
+            chunk_id=f"{parent_chunk_id}_part_{index:03d}",
+            source_type=f"{source_type}_part",
+            parent_id=parent_chunk_id,
+            title=f"{title} part {index}",
+            text=part_text,
+            skill_ids=skill_ids or _infer_skill_ids(part_text, _build_skill_index(entry if role == "skill_dictionary" else None)),
+            locator=locator,
+            config=config,
+            chunk_index=index,
+            split_strategy=strategy,
+        )
+        for index, (part_text, strategy) in enumerate(parts, start=1)
+    ]
 
 
 def _coarse_chunk(
@@ -363,6 +419,60 @@ def _markdown_sections(text: str) -> list[dict[str, Any]]:
             "line_end": line_end,
         })
     return sections
+
+
+def _split_large_text(text: str, max_chars: int, overlap_chars: int) -> list[tuple[str, str]]:
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    if len(paragraphs) > 1 and all(len(part) <= max_chars for part in paragraphs):
+        return [(part, "paragraph") for part in paragraphs]
+
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+", text) if part.strip()]
+    if len(sentences) > 1 and all(len(part) <= max_chars for part in sentences):
+        return _pack_units(sentences, max_chars, "sentence")
+
+    words = text.split()
+    if not words:
+        return [(text[:max_chars], "fixed_window")]
+    parts: list[tuple[str, str]] = []
+    current: list[str] = []
+    for word in words:
+        candidate = " ".join([*current, word])
+        if current and len(candidate) > max_chars:
+            chunk = " ".join(current)
+            parts.append((chunk, "fixed_window"))
+            current = _overlap_words(chunk, overlap_chars)
+        current.append(word)
+    if current:
+        parts.append((" ".join(current), "fixed_window"))
+    return parts
+
+
+def _pack_units(units: list[str], max_chars: int, strategy: str) -> list[tuple[str, str]]:
+    parts: list[tuple[str, str]] = []
+    current: list[str] = []
+    for unit in units:
+        candidate = " ".join([*current, unit])
+        if current and len(candidate) > max_chars:
+            parts.append((" ".join(current), strategy))
+            current = []
+        current.append(unit)
+    if current:
+        parts.append((" ".join(current), strategy))
+    return parts
+
+
+def _overlap_words(text: str, overlap_chars: int) -> list[str]:
+    if overlap_chars <= 0:
+        return []
+    words = text.split()
+    result: list[str] = []
+    total = 0
+    for word in reversed(words):
+        total += len(word) + 1
+        if total > overlap_chars:
+            break
+        result.insert(0, word)
+    return result
 
 
 def _keywords(text: str) -> list[str]:

@@ -14,6 +14,12 @@ class PreprocessingConfigurationError(ValueError):
 class ChunkingConfig:
     enabled: bool = True
     strategy: str = "educational_entities"
+    sizing_mode: str = "auto"
+    target_chunk_tokens: int | None = None
+    min_chunk_tokens: int = 300
+    max_chunk_tokens: int | None = None
+    overlap_tokens: int = 80
+    strict: bool = False
     max_chunk_chars: int = 900
     max_pair_text_chars: int = 160
 
@@ -54,6 +60,23 @@ class PreprocessingConfig:
     def from_input_payload(cls, input_payload: dict[str, Any]) -> "PreprocessingConfig":
         """Build preprocessing config from the optional parsed config input."""
         data = _preprocessing_section(input_payload)
+        chunking_data = _nested(data, "chunking")
+        token_budget_data = _nested(data, "token_budget")
+        max_input_tokens = _positive_int(
+            token_budget_data.get("max_input_tokens"),
+            TokenBudgetConfig.max_input_tokens,
+            "preprocessing.token_budget.max_input_tokens",
+        )
+        reserve_output_tokens = _positive_int(
+            token_budget_data.get("reserve_output_tokens"),
+            TokenBudgetConfig.reserve_output_tokens,
+            "preprocessing.token_budget.reserve_output_tokens",
+        )
+        if reserve_output_tokens >= max_input_tokens:
+            raise PreprocessingConfigurationError(
+                "`preprocessing.token_budget.reserve_output_tokens` must be smaller than "
+                "`preprocessing.token_budget.max_input_tokens`."
+            )
         return cls(
             enabled=_bool_setting(data.get("enabled"), cls.enabled),
             write_intermediate_outputs=_bool_setting(
@@ -61,15 +84,35 @@ class PreprocessingConfig:
                 cls.write_intermediate_outputs,
             ),
             chunking=ChunkingConfig(
-                enabled=_bool_setting(_nested(data, "chunking").get("enabled"), ChunkingConfig.enabled),
-                strategy=str(_nested(data, "chunking").get("strategy") or ChunkingConfig.strategy),
+                enabled=_bool_setting(chunking_data.get("enabled"), ChunkingConfig.enabled),
+                strategy=str(chunking_data.get("strategy") or ChunkingConfig.strategy),
+                sizing_mode=_chunk_sizing_mode(chunking_data.get("sizing_mode") or ChunkingConfig.sizing_mode),
+                target_chunk_tokens=_optional_positive_int(
+                    chunking_data.get("target_chunk_tokens"),
+                    "preprocessing.chunking.target_chunk_tokens",
+                ),
+                min_chunk_tokens=_positive_int(
+                    chunking_data.get("min_chunk_tokens"),
+                    ChunkingConfig.min_chunk_tokens,
+                    "preprocessing.chunking.min_chunk_tokens",
+                ),
+                max_chunk_tokens=_optional_positive_int(
+                    chunking_data.get("max_chunk_tokens"),
+                    "preprocessing.chunking.max_chunk_tokens",
+                ),
+                overlap_tokens=_non_negative_int(
+                    chunking_data.get("overlap_tokens"),
+                    ChunkingConfig.overlap_tokens,
+                    "preprocessing.chunking.overlap_tokens",
+                ),
+                strict=_bool_setting(chunking_data.get("strict"), ChunkingConfig.strict),
                 max_chunk_chars=_positive_int(
-                    _nested(data, "chunking").get("max_chunk_chars"),
+                    chunking_data.get("max_chunk_chars"),
                     ChunkingConfig.max_chunk_chars,
                     "preprocessing.chunking.max_chunk_chars",
                 ),
                 max_pair_text_chars=_positive_int(
-                    _nested(data, "chunking").get("max_pair_text_chars"),
+                    chunking_data.get("max_pair_text_chars"),
                     ChunkingConfig.max_pair_text_chars,
                     "preprocessing.chunking.max_pair_text_chars",
                 ),
@@ -96,17 +139,9 @@ class PreprocessingConfig:
                 ),
             ),
             token_budget=TokenBudgetConfig(
-                enabled=_bool_setting(_nested(data, "token_budget").get("enabled"), TokenBudgetConfig.enabled),
-                max_input_tokens=_positive_int(
-                    _nested(data, "token_budget").get("max_input_tokens"),
-                    TokenBudgetConfig.max_input_tokens,
-                    "preprocessing.token_budget.max_input_tokens",
-                ),
-                reserve_output_tokens=_positive_int(
-                    _nested(data, "token_budget").get("reserve_output_tokens"),
-                    TokenBudgetConfig.reserve_output_tokens,
-                    "preprocessing.token_budget.reserve_output_tokens",
-                ),
+                enabled=_bool_setting(token_budget_data.get("enabled"), TokenBudgetConfig.enabled),
+                max_input_tokens=max_input_tokens,
+                reserve_output_tokens=reserve_output_tokens,
             ),
         )
 
@@ -148,6 +183,31 @@ def _positive_int(value: Any, default: int, name: str) -> int:
     if parsed <= 0:
         raise PreprocessingConfigurationError(f"`{name}` must be positive.")
     return parsed
+
+
+def _optional_positive_int(value: Any, name: str) -> int | None:
+    if value is None or value == "":
+        return None
+    return _positive_int(value, 1, name)
+
+
+def _non_negative_int(value: Any, default: int, name: str) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise PreprocessingConfigurationError(f"`{name}` must be an integer.") from exc
+    if parsed < 0:
+        raise PreprocessingConfigurationError(f"`{name}` must be zero or positive.")
+    return parsed
+
+
+def _chunk_sizing_mode(value: Any) -> str:
+    mode = str(value).strip().lower()
+    if mode not in {"auto", "fixed"}:
+        raise PreprocessingConfigurationError(f"Unsupported chunk sizing mode `{value}`.")
+    return mode
 
 
 def _retrieval_mode(value: Any) -> str:

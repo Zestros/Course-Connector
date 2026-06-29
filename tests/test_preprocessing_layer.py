@@ -30,6 +30,10 @@ from course_connector.preprocessing_layer.embeddings.local_sentence_transformer 
     LocalSentenceTransformerEmbeddingProvider,
 )
 from course_connector.preprocessing_layer.retrieval import keyword_retrieve
+from course_connector.preprocessing_layer.token_budget import (
+    PreprocessingBudgetError,
+    recommended_chunk_tokens,
+)
 
 
 def test_default_preprocessing_config_is_lightweight() -> None:
@@ -103,6 +107,85 @@ def test_keyword_retrieval_ignores_unrelated_generated_outcome_positions() -> No
     )
 
     assert context["retrieved_pairs"] == []
+
+
+def test_preprocessing_config_rejects_invalid_context_budget() -> None:
+    payload = dict(_payload())
+    payload["config"] = {
+        "parsed_data": {
+            "preprocessing": {
+                "token_budget": {
+                    "max_input_tokens": 100,
+                    "reserve_output_tokens": 100,
+                }
+            }
+        }
+    }
+
+    with pytest.raises(PreprocessingConfigurationError, match="reserve_output_tokens"):
+        PreprocessingConfig.from_input_payload(payload)
+
+
+def test_recommended_chunk_size_scales_with_model_context() -> None:
+    small = PreprocessingConfig(
+        enabled=True,
+        token_budget=TokenBudgetConfig(max_input_tokens=10_000, reserve_output_tokens=1_500),
+    )
+    large = PreprocessingConfig(
+        enabled=True,
+        token_budget=TokenBudgetConfig(max_input_tokens=1_000_000, reserve_output_tokens=1_500),
+    )
+
+    assert recommended_chunk_tokens(small) < recommended_chunk_tokens(large)
+
+
+def test_chunk_sizing_auto_adjusts_unsafe_character_limit() -> None:
+    context = prepare_analysis_context(
+        _payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            chunking=ChunkingConfig(max_chunk_chars=10_000, min_chunk_tokens=100),
+            retrieval=RetrievalConfig(enabled=False, mode="none"),
+            token_budget=TokenBudgetConfig(max_input_tokens=1_500, reserve_output_tokens=300),
+        ),
+    )
+
+    assert context["metrics"]["recommended_chunk_chars"] < 10_000
+    assert any("Auto-adjusted chunk size" in warning for warning in context["warnings"])
+
+
+def test_chunk_sizing_strict_mode_rejects_unsafe_character_limit() -> None:
+    with pytest.raises(PreprocessingBudgetError) as exc_info:
+        prepare_analysis_context(
+            _payload(),
+            config=PreprocessingConfig(
+                enabled=True,
+                chunking=ChunkingConfig(max_chunk_chars=10_000, min_chunk_tokens=100, strict=True),
+                retrieval=RetrievalConfig(enabled=False, mode="none"),
+                token_budget=TokenBudgetConfig(max_input_tokens=1_500, reserve_output_tokens=300),
+            ),
+        )
+
+    assert exc_info.value.code == "chunk_too_large_for_model"
+
+
+def test_large_module_is_split_into_parented_subchunks() -> None:
+    context = prepare_analysis_context(
+        _large_module_payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            chunking=ChunkingConfig(max_chunk_chars=120, min_chunk_tokens=20),
+            retrieval=RetrievalConfig(enabled=False, mode="none"),
+        ),
+    )
+
+    module_parts = [chunk for chunk in context["chunks"]["course_a"] if chunk["source_type"] == "module_part"]
+
+    assert len(module_parts) >= 2
+    assert all(len(chunk["text"]) <= 120 for chunk in module_parts)
+    assert all(chunk["parent_id"] == "course_a_module_01" for chunk in module_parts)
+    assert all(chunk["chunk_index"] >= 1 for chunk in module_parts)
+    assert all(chunk["split_strategy"] for chunk in module_parts)
 
 
 def test_local_embeddings_can_fallback_to_keyword_without_dependency() -> None:
@@ -207,19 +290,19 @@ def test_local_embedding_provider_optional_integration() -> None:
     assert vectors[0]
 
 
-def test_token_budget_compacts_retrieved_pairs() -> None:
-    context = prepare_analysis_context(
-        _payload(),
-        config=PreprocessingConfig(
-            enabled=True,
-            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=10),
-            chunking=ChunkingConfig(max_pair_text_chars=20),
-            token_budget=TokenBudgetConfig(max_input_tokens=10, reserve_output_tokens=5),
-        ),
-    )
+def test_token_budget_rejects_context_too_small_for_prompt_wrapper() -> None:
+    with pytest.raises(PreprocessingBudgetError) as exc_info:
+        prepare_analysis_context(
+            _payload(),
+            config=PreprocessingConfig(
+                enabled=True,
+                retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=10),
+                chunking=ChunkingConfig(max_pair_text_chars=20),
+                token_budget=TokenBudgetConfig(max_input_tokens=10, reserve_output_tokens=5),
+            ),
+        )
 
-    assert context["metrics"]["estimated_input_tokens"] <= 5
-    assert any("Token budget" in warning for warning in context["warnings"])
+    assert exc_info.value.code == "model_context_too_small"
 
 
 def test_llm_prompt_uses_retrieved_pairs_when_present() -> None:
@@ -238,6 +321,66 @@ def test_llm_prompt_uses_retrieved_pairs_when_present() -> None:
     assert "Retrieved evidence pairs:" in prompt
     assert "retrieved_001" in prompt
     assert "evidence_refs" in prompt
+
+
+def test_evidence_first_prompt_omits_full_raw_course_text() -> None:
+    payload = _payload_with_raw_tail("UNIQUE_RAW_TAIL_SHOULD_NOT_APPEAR")
+    context = prepare_analysis_context(
+        payload,
+        config=PreprocessingConfig(
+            enabled=True,
+            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=2),
+        ),
+    )
+    payload = dict(payload)
+    payload["preprocessing"] = context
+
+    prompt = build_prompt(build_prompt_context(payload))
+
+    assert "Selected evidence chunks:" in prompt
+    assert "UNIQUE_RAW_TAIL_SHOULD_NOT_APPEAR" not in prompt
+
+
+def test_pipeline_rejects_oversized_legacy_prompt_before_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fake_analyze_courses(payload: dict[str, object]) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {"status": "completed", "relations": [], "warnings": []}
+
+    monkeypatch.setattr("course_connector.pipeline.analyze_courses", fake_analyze_courses)
+    course_a = _write(tmp_path / "course_a.md", "# A\n" + ("very long text " * 300))
+    course_b = _write(tmp_path / "course_b.md", "# B\n" + ("another long text " * 300))
+    skill_dictionary = _write(tmp_path / "skills.yaml", _skills_yaml())
+    assessments = _write(tmp_path / "assessments.csv", "title,skill\nCLI task,python_basics\n")
+    config = _write(
+        tmp_path / "config.yaml",
+        """
+preprocessing:
+  enabled: false
+  token_budget:
+    enabled: true
+    max_input_tokens: 500
+    reserve_output_tokens: 100
+""",
+    )
+    payload = load_input_payload(
+        course_a=course_a,
+        course_b=course_b,
+        skill_dictionary=skill_dictionary,
+        assessments=assessments,
+        config=config,
+    )
+
+    with pytest.raises(PreprocessingBudgetError) as exc_info:
+        run_pipeline(payload, tmp_path / "outputs")
+
+    assert exc_info.value.code == "input_too_large_without_chunking"
+    assert called is False
 
 
 def test_relation_normalization_preserves_evidence_refs() -> None:
@@ -291,10 +434,16 @@ preprocessing:
 
     assert (tmp_path / "outputs" / "chunks_course_a.json").is_file()
     assert (tmp_path / "outputs" / "chunks_course_b.json").is_file()
+    assert (tmp_path / "outputs" / "selected_chunks.json").is_file()
     assert (tmp_path / "outputs" / "retrieved_pairs.json").is_file()
     assert (tmp_path / "outputs" / "preprocessing_summary.json").is_file()
     assert result_json["preprocessing"]["enabled"] is True
     assert result_json["preprocessing"]["metrics"]["retrieved_pairs"] <= 2
+    assert result_json["preprocessing"]["metrics"]["available_input_tokens"] > 0
+    assert result_json["preprocessing"]["metrics"]["prompt_overhead_tokens"] > 0
+    assert result_json["preprocessing"]["metrics"]["recommended_chunk_chars"] > 0
+    assert result_json["preprocessing"]["metrics"]["selected_chunks"] > 0
+    assert result_json["preprocessing"]["metrics"]["estimated_prompt_tokens"] > 0
 
 
 def _payload() -> dict[str, object]:
@@ -395,6 +544,37 @@ def _unrelated_outcomes_payload() -> dict[str, object]:
         "normalized_text": "title,skill\nБез совпадений,totally_different",
         "parsed_data": [{"title": "Без совпадений", "skill": "totally_different"}],
     }
+    return payload
+
+
+def _large_module_payload() -> dict[str, object]:
+    payload = dict(_payload())
+    long_description = " ".join(f"paragraph sentence {index}." for index in range(80))
+    payload["course_a"] = {
+        "source_path": "course_a.yaml",
+        "format": "yaml",
+        "raw_text": f"modules:\n  - id: module_01\n    title: Big Module\n    description: {long_description}\n",
+        "normalized_text": f"modules:\n  - id: module_01\n    title: Big Module\n    description: {long_description}\n",
+        "parsed_data": {
+            "modules": [
+                {
+                    "id": "module_01",
+                    "title": "Big Module",
+                    "description": long_description,
+                    "skills": ["python_basics"],
+                }
+            ]
+        },
+    }
+    return payload
+
+
+def _payload_with_raw_tail(tail: str) -> dict[str, object]:
+    payload = dict(_payload())
+    course_a = dict(payload["course_a"])  # type: ignore[arg-type]
+    course_a["raw_text"] = f"{course_a['raw_text']}\n{tail}\n"
+    course_a["normalized_text"] = f"{course_a['normalized_text']}\n{tail}\n"
+    payload["course_a"] = course_a
     return payload
 
 

@@ -9,7 +9,7 @@ from typing import Any
 from course_connector.preprocessing_layer.chunking import build_chunks
 from course_connector.preprocessing_layer.config import PreprocessingConfig
 from course_connector.preprocessing_layer.retrieval import retrieve_pairs
-from course_connector.preprocessing_layer.token_budget import apply_token_budget
+from course_connector.preprocessing_layer.token_budget import apply_chunk_sizing_policy, apply_token_budget
 
 
 def prepare_analysis_context(
@@ -38,29 +38,40 @@ def prepare_analysis_context(
             "write_intermediate_outputs": False,
         }
 
-    chunks, chunk_warnings = build_chunks(input_payload, config.chunking)
-    pairs, retrieval_warnings = retrieve_pairs(chunks, config)
-    pairs, budget_metrics, budget_warnings = apply_token_budget(pairs, config)
+    effective_config, sizing_metrics, sizing_warnings = apply_chunk_sizing_policy(config)
+    chunks, chunk_warnings = build_chunks(input_payload, effective_config.chunking)
+    pairs, retrieval_warnings = retrieve_pairs(chunks, effective_config)
+    pairs, budget_metrics, budget_warnings = apply_token_budget(pairs, effective_config)
+    selected_chunks = _selected_chunks(chunks, pairs)
     evidence_refs = _evidence_refs(chunks, pairs)
+    evidence_warnings = []
+    if not selected_chunks and not pairs:
+        evidence_warnings.append(
+            "no_evidence_selected: preprocessing did not select evidence chunks; "
+            "the pipeline will use a budget-validated fallback context if it fits."
+        )
     metrics = {
+        **sizing_metrics,
         **budget_metrics,
         "chunks_course_a": len(chunks.get("course_a", [])),
         "chunks_course_b": len(chunks.get("course_b", [])),
         "chunks_assessments": len(chunks.get("assessments", [])),
+        "selected_chunks": len(selected_chunks),
         "retrieved_pairs": len(pairs),
-        "retrieval_mode": config.retrieval.mode if config.retrieval.enabled else "none",
-        "embedding_model": config.embeddings.model if config.embeddings.enabled else None,
+        "retrieval_mode": effective_config.retrieval.mode if effective_config.retrieval.enabled else "none",
+        "embedding_model": effective_config.embeddings.model if effective_config.embeddings.enabled else None,
     }
     return {
         "enabled": True,
         "mode": metrics["retrieval_mode"],
         "input_payload": input_payload,
         "chunks": chunks,
+        "selected_chunks": selected_chunks,
         "retrieved_pairs": pairs,
         "evidence_refs": evidence_refs,
         "metrics": metrics,
-        "warnings": [*chunk_warnings, *retrieval_warnings, *budget_warnings],
-        "write_intermediate_outputs": config.write_intermediate_outputs,
+        "warnings": [*sizing_warnings, *chunk_warnings, *retrieval_warnings, *budget_warnings, *evidence_warnings],
+        "write_intermediate_outputs": effective_config.write_intermediate_outputs,
     }
 
 
@@ -72,11 +83,13 @@ def write_intermediate_outputs(output_dir: Path, analysis_context: dict[str, Any
     outputs = {
         "chunks_course_a": output_dir / "chunks_course_a.json",
         "chunks_course_b": output_dir / "chunks_course_b.json",
+        "selected_chunks": output_dir / "selected_chunks.json",
         "retrieved_pairs": output_dir / "retrieved_pairs.json",
         "preprocessing_summary": output_dir / "preprocessing_summary.json",
     }
     outputs["chunks_course_a"].write_text(_json(chunks.get("course_a", [])), encoding="utf-8")
     outputs["chunks_course_b"].write_text(_json(chunks.get("course_b", [])), encoding="utf-8")
+    outputs["selected_chunks"].write_text(_json(analysis_context.get("selected_chunks", [])), encoding="utf-8")
     outputs["retrieved_pairs"].write_text(_json(analysis_context.get("retrieved_pairs", [])), encoding="utf-8")
     outputs["preprocessing_summary"].write_text(
         _json({
@@ -107,6 +120,26 @@ def _evidence_refs(chunks: dict[str, list[dict[str, Any]]], pairs: list[dict[str
         if pair.get("pair_id")
     }
     return {"chunks": chunk_refs, "pairs": pair_refs}
+
+
+def _selected_chunks(
+    chunks: dict[str, list[dict[str, Any]]],
+    pairs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_id = {
+        chunk["chunk_id"]: chunk
+        for role in ("course_a", "course_b", "assessments")
+        for chunk in chunks.get(role, [])
+    }
+    if pairs:
+        selected_ids: list[str] = []
+        for pair in pairs:
+            for key in ("course_a_chunk_id", "course_b_chunk_id"):
+                chunk_id = pair.get(key)
+                if chunk_id and chunk_id not in selected_ids:
+                    selected_ids.append(chunk_id)
+        return [by_id[chunk_id] for chunk_id in selected_ids if chunk_id in by_id]
+    return [chunk for role in ("course_a", "course_b") for chunk in chunks.get(role, [])]
 
 
 def _json(data: Any) -> str:

@@ -9,6 +9,7 @@ from typing import Sequence
 
 from course_connector.input_layer import InputLayerError, load_input_payload
 from course_connector.pipeline import run_pipeline
+from course_connector.preprocessing_layer.config import PreprocessingConfigurationError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,7 +66,10 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
     except InputLayerError as exc:
         parser.exit(2, f"Error: {exc}\n")
 
-    result = run_pipeline(input_payload, output_dir=args.output_dir)
+    try:
+        result = run_pipeline(input_payload, output_dir=args.output_dir)
+    except PreprocessingConfigurationError as exc:
+        parser.exit(2, f"Error: {exc}\n")
     print("Pipeline completed.")
     print(f"Markdown report: {result.report_md}")
     print(f"JSON result: {result.result_json}")
