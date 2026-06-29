@@ -125,6 +125,25 @@ def test_keyword_retrieval_does_not_treat_course_a_assessment_as_course_b_eviden
     assert any("course_b b1" in pair["course_b_text"] for pair in pairs)
 
 
+def test_selected_chunks_expand_assessment_support_by_skill_and_course() -> None:
+    context = prepare_analysis_context(
+        _markdown_assessment_support_payload(),
+        config=PreprocessingConfig(
+            enabled=True,
+            retrieval=RetrievalConfig(enabled=True, mode="keyword", top_k=1),
+        ),
+    )
+
+    selected_chunks = context["selected_chunks"]
+    selected_text = " ".join(chunk["text"] for chunk in selected_chunks)
+    selected_roles = {chunk["source_role"] for chunk in selected_chunks}
+
+    assert "Assessment A2" in selected_text
+    assert "conflict markers" in selected_text
+    assert "GitHub review workflow" not in selected_text
+    assert "course_b" not in selected_roles
+
+
 def test_preprocessing_config_rejects_invalid_context_budget() -> None:
     payload = dict(_payload())
     payload["config"] = {
@@ -399,6 +418,83 @@ preprocessing:
     assert called is False
 
 
+def test_pipeline_rejects_oversized_prompt_with_assessment_support(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fake_analyze_courses(payload: dict[str, object]) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {"status": "completed", "relations": [], "warnings": []}
+
+    monkeypatch.setattr("course_connector.pipeline.analyze_courses", fake_analyze_courses)
+    course_a = _write(
+        tmp_path / "course_a.md",
+        (
+            "# Course A\n"
+            "## Intro\n"
+            "Python basics introduction.\n"
+            "## Skill One\n"
+            f"{'Python basics details. ' * 60}\n"
+            "## Skill Two\n"
+            f"{'Command line details. ' * 60}\n"
+        ),
+    )
+    course_b = _write(tmp_path / "course_b.md", "# Course B\nUnrelated review workflow.\n")
+    skill_dictionary = _write(
+        tmp_path / "skills.yaml",
+        """
+skills:
+  - id: python_basics
+    title: Python basics
+    aliases: [Python basics]
+  - id: cli_usage
+    title: Command line
+    aliases: [Command line]
+""",
+    )
+    assessments = _write(
+        tmp_path / "assessments.md",
+        (
+            "# Assessments\n"
+            "## Assessment A1\n"
+            "- Course: Course A\n"
+            "- Skill IDs: python_basics, cli_usage\n"
+            "Python basics command line assessment.\n"
+        ),
+    )
+    config = _write(
+        tmp_path / "config.yaml",
+        """
+preprocessing:
+  enabled: true
+  retrieval:
+    enabled: true
+    mode: keyword
+    top_k: 1
+  token_budget:
+    enabled: true
+    max_input_tokens: 2100
+    reserve_output_tokens: 300
+""",
+    )
+    payload = load_input_payload(
+        course_a=course_a,
+        course_b=course_b,
+        skill_dictionary=skill_dictionary,
+        assessments=assessments,
+        config=config,
+    )
+
+    with pytest.raises(PreprocessingBudgetError) as exc_info:
+        run_pipeline(payload, tmp_path / "outputs")
+
+    assert exc_info.value.code == "prompt_budget_exceeded_after_chunking"
+    assert called is False
+
+
 def test_relation_normalization_preserves_evidence_refs() -> None:
     response = json.dumps({
         "summary": "S",
@@ -622,6 +718,88 @@ def _course_id_assessments_payload() -> dict[str, object]:
                 "type": "project",
             },
         ],
+    }
+    return payload
+
+
+def _markdown_assessment_support_payload() -> dict[str, object]:
+    payload = dict(_payload())
+    payload["course_a"] = {
+        "source_path": "course_a.md",
+        "format": "markdown",
+        "raw_text": (
+            "# Course A\n"
+            "## Branching\n"
+            "Students create feature branches and merge them back into main.\n"
+            "## Conflict Resolution\n"
+            "Students inspect conflict markers and resolve merge conflicts by preserving both useful changes.\n"
+        ),
+        "normalized_text": (
+            "# Course A\n"
+            "## Branching\n"
+            "Students create feature branches and merge them back into main.\n"
+            "## Conflict Resolution\n"
+            "Students inspect conflict markers and resolve merge conflicts by preserving both useful changes.\n"
+        ),
+    }
+    payload["course_b"] = {
+        "source_path": "course_b.md",
+        "format": "markdown",
+        "raw_text": (
+            "# Course B\n"
+            "## Pull Request Review\n"
+            "GitHub review workflow appears here, but it belongs to Course B and should not support Course A assessment.\n"
+        ),
+        "normalized_text": (
+            "# Course B\n"
+            "## Pull Request Review\n"
+            "GitHub review workflow appears here, but it belongs to Course B and should not support Course A assessment.\n"
+        ),
+    }
+    payload["skill_dictionary"] = {
+        "source_path": "skills.yaml",
+        "format": "yaml",
+        "raw_text": (
+            "skills:\n"
+            "  - id: git_branching\n"
+            "    title: Git branching\n"
+            "    aliases: [branching, feature branches]\n"
+            "  - id: git_merge_conflict_resolution\n"
+            "    title: Git merge conflict resolution\n"
+            "    aliases: [merge conflicts, conflict markers]\n"
+        ),
+        "parsed_data": {
+            "skills": [
+                {
+                    "id": "git_branching",
+                    "title": "Git branching",
+                    "aliases": ["branching", "feature branches"],
+                },
+                {
+                    "id": "git_merge_conflict_resolution",
+                    "title": "Git merge conflict resolution",
+                    "aliases": ["merge conflicts", "conflict markers"],
+                },
+            ]
+        },
+    }
+    payload["assessments"] = {
+        "source_path": "assessments.md",
+        "format": "markdown",
+        "raw_text": (
+            "# Assessments\n"
+            "## Assessment A2\n"
+            "- Course: Course A\n"
+            "- Skill IDs: git_branching, git_merge_conflict_resolution\n"
+            "Students create a feature branch and resolve a merge conflict.\n"
+        ),
+        "normalized_text": (
+            "# Assessments\n"
+            "## Assessment A2\n"
+            "- Course: Course A\n"
+            "- Skill IDs: git_branching, git_merge_conflict_resolution\n"
+            "Students create a feature branch and resolve a merge conflict.\n"
+        ),
     }
     return payload
 

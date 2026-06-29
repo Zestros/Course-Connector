@@ -37,5 +37,5 @@ preprocessing:
     local_files_only: true
   token_budget:
     enabled: true
-    max_input_tokens: 10000
+    max_input_tokens: 13000
     reserve_output_tokens: 1500

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,9 @@ from course_connector.preprocessing_layer.chunking import build_chunks
 from course_connector.preprocessing_layer.config import PreprocessingConfig
 from course_connector.preprocessing_layer.retrieval import retrieve_pairs
 from course_connector.preprocessing_layer.token_budget import apply_chunk_sizing_policy, apply_token_budget
+
+
+MAX_SUPPORT_CHUNKS_PER_SKILL = 1
 
 
 def prepare_analysis_context(
@@ -138,8 +142,99 @@ def _selected_chunks(
                 chunk_id = pair.get(key)
                 if chunk_id and chunk_id not in selected_ids:
                     selected_ids.append(chunk_id)
+        selected_ids.extend(_assessment_support_chunk_ids(chunks, by_id, selected_ids))
         return [by_id[chunk_id] for chunk_id in selected_ids if chunk_id in by_id]
     return [chunk for role in ("course_a", "course_b") for chunk in chunks.get(role, [])]
+
+
+def _assessment_support_chunk_ids(
+    chunks: dict[str, list[dict[str, Any]]],
+    by_id: dict[str, dict[str, Any]],
+    selected_ids: list[str],
+) -> list[str]:
+    """Add course chunks that directly teach selected assessment skill IDs."""
+    selected = set(selected_ids)
+    support_ids: list[str] = []
+    for chunk_id in selected_ids:
+        assessment = by_id.get(chunk_id)
+        if not assessment or assessment.get("source_role") != "assessments":
+            continue
+        skill_ids = list(assessment.get("skill_ids") or [])
+        if not skill_ids:
+            continue
+        for role in _assessment_course_roles(assessment):
+            for skill_id in skill_ids:
+                matches = _rank_support_chunks(chunks.get(role, []), assessment, skill_id)
+                added_for_skill = 0
+                for match in matches:
+                    match_id = match.get("chunk_id")
+                    if not match_id or match_id in selected:
+                        continue
+                    selected.add(match_id)
+                    support_ids.append(match_id)
+                    added_for_skill += 1
+                    if added_for_skill >= MAX_SUPPORT_CHUNKS_PER_SKILL:
+                        break
+    return support_ids
+
+
+def _assessment_course_roles(assessment: dict[str, Any]) -> list[str]:
+    course_id = str(assessment.get("course_id") or "").strip().lower()
+    text = " ".join([str(assessment.get("title") or ""), str(assessment.get("text") or "")])
+    course_label = _markdown_course_label(text)
+    if course_id in {"course_a", "a"} or course_label == "course a":
+        return ["course_a"]
+    if course_id in {"course_b", "b"} or course_label == "course b":
+        return ["course_b"]
+    if course_id == "both" or course_label == "both":
+        return ["course_a", "course_b"]
+    return ["course_a", "course_b"]
+
+
+def _markdown_course_label(text: str) -> str:
+    match = re.search(r"(?:^|\s)-?\s*Course\s*:\s*(Course\s+[AB]|Both)\b", text, flags=re.IGNORECASE)
+    return match.group(1).lower() if match else ""
+
+
+def _rank_support_chunks(
+    course_chunks: list[dict[str, Any]],
+    assessment: dict[str, Any],
+    skill_id: str,
+) -> list[dict[str, Any]]:
+    assessment_keywords = set(assessment.get("keywords") or [])
+    candidates = [
+        chunk
+        for chunk in course_chunks
+        if skill_id in set(chunk.get("skill_ids") or [])
+        and chunk.get("source_type") not in {"assessment", "row"}
+    ]
+    return sorted(
+        candidates,
+        key=lambda chunk: (
+            _support_source_type_rank(str(chunk.get("source_type") or "")),
+            _support_title_rank(str(chunk.get("title") or "")),
+            -len(assessment_keywords & set(chunk.get("keywords") or [])),
+            len(str(chunk.get("text") or "")),
+            str(chunk.get("chunk_id") or ""),
+        ),
+    )
+
+
+def _support_source_type_rank(source_type: str) -> int:
+    if source_type in {"raw_section", "module", "topic", "outcome"}:
+        return 0
+    if source_type.endswith("_part"):
+        return 1
+    return 2
+
+
+def _support_title_rank(title: str) -> int:
+    normalized = title.strip().lower()
+    if normalized in {"практика", "practice", "теория", "theory"}:
+        return 0
+    if normalized in {"результаты обучения", "learning outcomes", "цели курса", "course goals"}:
+        return 2
+    return 1
 
 
 def _json(data: Any) -> str:
