@@ -1,0 +1,44 @@
+name: course-connector
+title: Course Connector
+type: teacher-side / integration-layer
+status: mvp
+primary_interface: cli
+description: >
+  Compares two course descriptions through skills, learning outcomes, and
+  assessment evidence, then writes a Markdown report and machine-readable JSON.
+inputs:
+  - name: course_a
+    format: Markdown or YAML
+  - name: course_b
+    format: Markdown or YAML
+  - name: skill_dictionary
+    format: YAML or JSON
+  - name: assessments
+    format: Markdown, YAML, or CSV
+  - name: config
+    format: YAML
+outputs:
+  - name: report
+    format: Markdown
+    path: outputs/
+  - name: result
+    format: JSON
+    path: outputs/
+automation:
+  install: make install
+  test: make test
+  demo: make demo
+  cli: make run-cli
+  docker_build: make docker-build
+  docker_demo: make docker-up
+mvp_scope:
+  included:
+    - load two local course files
+    - load one skill dictionary
+    - load assessment evidence
+    - classify useful repetition, probable duplication, and probable gap candidates
+    - write Markdown and JSON outputs
+  excluded:
+    - automatic course changes
+    - LMS synchronization
+    - multi-user web workflow

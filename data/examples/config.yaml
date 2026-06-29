@@ -1,2 +1,12 @@
 output_language: ru
 include_summary: true
+llm:
+  provider: mock
+  output_language: ru
+preprocessing:
+  enabled: true
+  write_intermediate_outputs: true
+  retrieval:
+    enabled: true
+    mode: keyword
+    top_k: 8

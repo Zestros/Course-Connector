@@ -1,0 +1,21 @@
+services:
+  course-connector-demo:
+    build: .
+    image: course-connector:local
+    command:
+      - course-connector
+      - run
+      - --course-a
+      - data/examples/course_a/course.yaml
+      - --course-b
+      - data/examples/course_b/course.yaml
+      - --skill-dictionary
+      - data/examples/skill_dictionary.yaml
+      - --assessments
+      - data/examples/assessments.csv
+      - --config
+      - data/examples/config.yaml
+      - --output-dir
+      - outputs/demo
+    volumes:
+      - ./outputs:/app/outputs
