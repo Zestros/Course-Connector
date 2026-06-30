@@ -470,6 +470,46 @@ def test_smart_batch_matches_assessment_by_alias_without_explicit_skill_id() -> 
     assert assessment_batches
 
 
+def test_skill_alias_matching_uses_word_boundaries_for_short_aliases() -> None:
+    payload = _payload()
+    payload["skill_dictionary"] = {
+        "source_path": "skills.yaml",
+        "format": "yaml",
+        "raw_text": """
+skills:
+  - id: github_actions_ci
+    title: GitHub Actions CI
+    aliases:
+      - CI
+""",
+        "parsed_data": {
+            "skills": [
+                {
+                    "id": "github_actions_ci",
+                    "title": "GitHub Actions CI",
+                    "aliases": ["CI"],
+                }
+            ]
+        },
+    }
+    payload["assessments"] = {
+        "source_path": "assessments.md",
+        "format": "markdown",
+        "raw_text": "# Assessments\n\n## Task\n\nThe issue contains acceptance criteria and review notes.\n",
+        "normalized_text": "# Assessments\n\n## Task\n\nThe issue contains acceptance criteria and review notes.",
+    }
+
+    context = prepare_analysis_context(
+        payload,
+        config=PreprocessingConfig(enabled=True, analysis_mode="smart_batch"),
+    )
+
+    assert all(
+        "github_actions_ci" not in chunk.get("skill_ids", [])
+        for chunk in context["chunks"]["assessments"]
+    )
+
+
 def test_pipeline_rejects_oversized_legacy_prompt_before_provider(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

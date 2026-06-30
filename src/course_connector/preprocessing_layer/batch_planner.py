@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from course_connector.llm_layer.prompts.batch_renderer import build_skill_batch_prompt
@@ -194,7 +195,7 @@ def _matching_chunks(
         if skill_id in set(chunk.get("skill_ids") or []):
             result.append(chunk)
             matched_by[chunk_id] = "explicit_skill_id"
-        elif any(alias in text for alias in aliases):
+        elif any(_candidate_matches(text, alias) for alias in aliases):
             result.append(chunk)
             matched_by[chunk_id] = "alias"
     return result, matched_by
@@ -213,7 +214,7 @@ def _matching_assessments(
         if chunk in matches:
             continue
         text = _chunk_search_text(chunk)
-        if any(alias in text for alias in aliases):
+        if any(_candidate_matches(text, alias) for alias in aliases):
             matches.append(chunk)
             matched_by[chunk_id] = "keyword_fallback"
             warnings.append(f"assessment_match_uncertain: `{chunk_id}` matched `{skill_id}` by alias text.")
@@ -289,6 +290,16 @@ def _skill_aliases(skill_id: str, skill: dict[str, Any]) -> list[str]:
         for item in [skill_id, skill.get("title"), *list(skill.get("aliases") or [])]
         if item
     ]
+
+
+def _candidate_matches(text: str, candidate: str) -> bool:
+    candidate = candidate.strip()
+    if not candidate:
+        return False
+    if candidate.lower() == "workflow":
+        lower = text.lower()
+        return "github actions" in lower or ".github/workflows" in lower
+    return re.search(rf"(?<![\w-]){re.escape(candidate)}(?![\w-])", text, flags=re.IGNORECASE) is not None
 
 
 def _chunk_search_text(chunk: dict[str, Any]) -> str:

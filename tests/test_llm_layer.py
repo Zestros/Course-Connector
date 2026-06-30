@@ -347,6 +347,52 @@ def test_batch_analyzer_filters_one_sided_repetition_findings() -> None:
     assert any("without Course A and Course B evidence" in warning for warning in analysis["warnings"])
 
 
+def test_batch_analyzer_adds_gap_for_course_b_only_skill_batch() -> None:
+    response = json.dumps({"summary": "batch ok", "findings": [], "warnings": []})
+    batch = _batch("skill_001_github_actions_ci")
+    batch["skill_ids"] = ["github_actions_ci"]
+    batch["skill_dictionary_subset"] = [{"id": "github_actions_ci", "title": "GitHub Actions CI", "aliases": []}]
+    batch["course_profiles"] = {
+        "course_a": {
+            "description": "Course A mentions GitHub Actions only as context.",
+            "excluded_topics": ["Course A does not teach GitHub Actions in detail."],
+            "profile_chunk_ids": ["course_a_section_002"],
+        }
+    }
+    batch["course_a_chunks"] = [
+        {
+            "chunk_id": "course_a_section_002",
+            "text": "GitHub Actions are mentioned only as context and are not the main subject.",
+            "source_role": "course_a",
+        }
+    ]
+    batch["course_a_chunk_ids"] = ["course_a_section_002"]
+    batch["course_b_chunks"] = [
+        {
+            "chunk_id": "course_b_section_022",
+            "text": "Students add a GitHub Actions workflow and fix failed checks.",
+            "source_role": "course_b",
+        }
+    ]
+    batch["course_b_chunk_ids"] = ["course_b_section_022"]
+    payload = _payload()
+    payload["preprocessing"] = {
+        "enabled": True,
+        "analysis_mode": "smart_batch",
+        "skill_batches": [batch],
+        "metrics": {},
+    }
+
+    analysis, updates = analyze_batches(payload, provider=StaticLLMProvider(response))
+
+    assert len(analysis["relations"]) == 1
+    relation = analysis["relations"][0]
+    assert relation["type"] == "probable_gap"
+    assert relation["skill_ids"] == ["github_actions_ci"]
+    assert relation["evidence_refs"] == ["course_a_section_002", "course_b_section_022"]
+    assert updates["metrics"]["executed_batches"] == 1
+
+
 def test_findings_merge_keeps_distinct_skills_separate() -> None:
     findings = [
         {
