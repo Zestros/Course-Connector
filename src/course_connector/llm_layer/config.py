@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+ROUTERAI_API_BASE_URL = "https://routerai.ru/api/v1"
+OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+
 
 class LLMConfigurationError(ValueError):
     """Raised when LLM configuration cannot be used."""
@@ -24,7 +28,7 @@ class LLMConfig:
     prompt_template: str = "default_analysis_prompt.md"
     output_language: str = "ru"
     api_key_file: Path | None = None
-    api_base_url: str = "https://openrouter.ai/api/v1/chat/completions"
+    api_base_url: str = OPENROUTER_API_BASE_URL
 
     @classmethod
     def from_input_payload(cls, input_payload: dict[str, Any] | None = None) -> "LLMConfig":
@@ -49,9 +53,18 @@ class LLMConfig:
 
     def with_environment_overrides(self) -> "LLMConfig":
         """Apply non-secret environment overrides."""
+        provider = os.getenv("COURSE_CONNECTOR_LLM_PROVIDER", self.provider)
+        provider_name = provider.strip().lower()
         return LLMConfig(
-            provider=os.getenv("COURSE_CONNECTOR_LLM_PROVIDER", self.provider),
-            model=os.getenv("OPENROUTER_MODEL", self.model),
+            provider=provider,
+            model=_provider_env_setting(
+                provider_name,
+                generic_name="COURSE_CONNECTOR_LLM_MODEL",
+                openrouter_name="OPENROUTER_MODEL",
+                routerai_name="ROUTERAI_MODEL",
+                openai_name="OPENAI_MODEL",
+                default=self.model,
+            ),
             temperature=_float_setting(
                 os.getenv("COURSE_CONNECTOR_LLM_TEMPERATURE"),
                 self.temperature,
@@ -68,8 +81,25 @@ class LLMConfig:
                 os.getenv("COURSE_CONNECTOR_OUTPUT_LANGUAGE") or os.getenv("COURSE_CONNECTOR_LLM_OUTPUT_LANGUAGE"),
                 self.output_language,
             ),
-            api_key_file=_optional_path(os.getenv("OPENROUTER_API_KEY_FILE")) or self.api_key_file,
-            api_base_url=os.getenv("OPENROUTER_API_BASE_URL", self.api_base_url),
+            api_key_file=_optional_path(
+                _provider_env_setting(
+                    provider_name,
+                    generic_name="COURSE_CONNECTOR_LLM_API_KEY_FILE",
+                    openrouter_name="OPENROUTER_API_KEY_FILE",
+                    routerai_name="ROUTERAI_API_KEY_FILE",
+                    openai_name="OPENAI_API_KEY_FILE",
+                    default="",
+                )
+            )
+            or self.api_key_file,
+            api_base_url=_provider_env_setting(
+                provider_name,
+                generic_name="COURSE_CONNECTOR_LLM_API_BASE_URL",
+                openrouter_name="OPENROUTER_API_BASE_URL",
+                routerai_name="ROUTERAI_API_BASE_URL",
+                openai_name="OPENAI_API_BASE_URL",
+                default=self.api_base_url,
+            ),
         )
 
     def load_openrouter_api_key(self) -> str:
@@ -84,6 +114,28 @@ class LLMConfig:
         raise LLMConfigurationError(
             "OpenRouter provider requires OPENROUTER_API_KEY or configured api_key_file."
         )
+
+    def load_routerai_api_key(self) -> str:
+        """Load RouterAI API key without exposing it in errors or metadata."""
+        key = os.getenv("ROUTERAI_API_KEY") or os.getenv("COURSE_CONNECTOR_LLM_API_KEY")
+        if key and key.strip():
+            return key.strip()
+        if self.api_key_file is not None and self.api_key_file.is_file():
+            key = self.api_key_file.read_text(encoding="utf-8").strip()
+            if key:
+                return key
+        raise LLMConfigurationError("RouterAI provider requires ROUTERAI_API_KEY or configured api_key_file.")
+
+    def load_openai_api_key(self) -> str:
+        """Load OpenAI API key without exposing it in errors or metadata."""
+        key = os.getenv("OPENAI_API_KEY") or os.getenv("COURSE_CONNECTOR_LLM_API_KEY")
+        if key and key.strip():
+            return key.strip()
+        if self.api_key_file is not None and self.api_key_file.is_file():
+            key = self.api_key_file.read_text(encoding="utf-8").strip()
+            if key:
+                return key
+        raise LLMConfigurationError("OpenAI provider requires OPENAI_API_KEY or configured api_key_file.")
 
 
 def _llm_section_from_payload(input_payload: dict[str, Any]) -> dict[str, Any]:
@@ -141,6 +193,22 @@ def _language_setting(value: Any, default: str) -> str:
     if language is None:
         raise LLMConfigurationError("LLM output language must be `ru` or `en`.")
     return language
+
+
+def _provider_env_setting(
+    provider: str,
+    *,
+    generic_name: str,
+    openrouter_name: str,
+    routerai_name: str,
+    openai_name: str,
+    default: str,
+) -> str:
+    provider_specific_name = {
+        "openai": openai_name,
+        "routerai": routerai_name,
+    }.get(provider, openrouter_name)
+    return os.getenv(generic_name) or os.getenv(provider_specific_name) or default
 
 
 def _optional_path(value: Any) -> Path | None:

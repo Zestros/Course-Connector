@@ -86,6 +86,112 @@ def test_run_command_allows_omitted_config(tmp_path: Path) -> None:
     assert "Optional input `config` was not provided." in result["warnings"]
 
 
+def test_run_command_writes_smart_batch_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    course_a = _write(tmp_path / "course_a.md", _valid_course_markdown("Course A", "cli_tools"))
+    course_b = _write(tmp_path / "course_b.md", _valid_course_markdown("Course B", "cli_tools"))
+    skill_dictionary = _write(tmp_path / "skill_dictionary.yaml", _valid_skill_dictionary("cli_tools"))
+    assessments = _write(tmp_path / "assessments.md", "# Assessments\n\nCLI task checks cli_tools.\n")
+    config = _write(
+        tmp_path / "config.yaml",
+        """
+llm:
+  provider: mock
+preprocessing:
+  enabled: true
+  analysis_mode: smart_batch
+  write_intermediate_outputs: true
+""",
+    )
+    output_dir = tmp_path / "outputs"
+
+    def fake_analyze_batches(
+        payload: dict[str, object],
+        **kwargs: object,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        preprocessing = payload["preprocessing"]  # type: ignore[index]
+        assert preprocessing["skill_batches"]  # type: ignore[index]
+        relation = {
+            "type": "useful_repetition",
+            "course_a_fragment": "A",
+            "course_b_fragment": "B",
+            "explanation": "Smart batch relation.",
+            "confidence": 0.8,
+            "skill_ids": ["cli_tools"],
+            "evidence_refs": ["chunk_a"],
+            "batch_id": "batch_001",
+        }
+        progress_callback = kwargs.get("progress_callback")
+        if progress_callback is not None:
+            progress_callback({
+                "event": "batch_start",
+                "batch_id": "batch_001",
+                "batch_type": "skill",
+                "skill_ids": ["cli_tools"],
+                "index": 1,
+                "total": 1,
+                "estimated_prompt_tokens": 100,
+            })
+            progress_callback({
+                "event": "batch_complete",
+                "batch_id": "batch_001",
+                "batch_type": "skill",
+                "skill_ids": ["cli_tools"],
+                "index": 1,
+                "total": 1,
+                "status": "completed",
+                "result": {"batch_id": "batch_001", "status": "completed", "findings": [relation]},
+            })
+        return (
+            {
+                "status": "completed",
+                "summary": "Smart batch ok.",
+                "relations": [relation],
+                "warnings": [],
+                "provider": "mock",
+                "provider_mode": "batch_test",
+            },
+            {
+                "batch_results": [{"batch_id": "batch_001", "status": "completed", "findings": [relation]}],
+                "merged_findings": [relation],
+                "metrics": {**preprocessing["metrics"], "executed_batches": 1, "failed_batches": 0},  # type: ignore[index]
+            },
+        )
+
+    monkeypatch.setattr("course_connector.pipeline.analyze_batches", fake_analyze_batches)
+
+    exit_code = main(
+        [
+            "run",
+            "--course-a",
+            str(course_a),
+            "--course-b",
+            str(course_b),
+            "--skill-dictionary",
+            str(skill_dictionary),
+            "--assessments",
+            str(assessments),
+            "--config",
+            str(config),
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    result = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
+    assert result["relations"]
+    assert result["preprocessing"]["analysis_mode"] == "smart_batch"
+    assert (output_dir / "course_profiles.json").is_file()
+    assert (output_dir / "skill_batches.json").is_file()
+    assert (output_dir / "batch_results.json").is_file()
+    assert (output_dir / "merged_findings.json").is_file()
+    assert "Smart batch 1/1 started" in capsys.readouterr().err
+
+
 def test_run_command_errors_when_required_file_is_missing(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -161,7 +267,7 @@ def test_run_command_stops_before_pipeline_when_course_template_is_invalid(
         called = True
         raise AssertionError("pipeline should not run for invalid input")
 
-    monkeypatch.setattr("course_connector.cli.run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr("course_connector.cli.run_pipeline_with_progress", fake_run_pipeline)
 
     with pytest.raises(SystemExit) as exc_info:
         main(

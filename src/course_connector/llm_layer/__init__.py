@@ -11,6 +11,8 @@ from course_connector.llm_layer.providers import (
     LLMProvider,
     LLMResponse,
     MockLLMProvider,
+    OpenAIProvider,
+    RouterAIProvider,
     StaticLLMProvider,
 )
 
@@ -21,6 +23,8 @@ __all__ = [
     "LLMProvider",
     "LLMResponse",
     "MockLLMProvider",
+    "OpenAIProvider",
+    "RouterAIProvider",
     "StaticLLMProvider",
     "analyze_courses",
     "build_prompt",

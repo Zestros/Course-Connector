@@ -20,6 +20,7 @@ from course_connector.llm_layer.prompts import build_prompt
 from course_connector.pipeline import run_pipeline
 from course_connector.preprocessing_layer import PreprocessingConfig, prepare_analysis_context
 from course_connector.preprocessing_layer.config import (
+    BatchConfig,
     ChunkingConfig,
     EmbeddingsConfig,
     PreprocessingConfigurationError,
@@ -158,6 +159,39 @@ def test_preprocessing_config_rejects_invalid_context_budget() -> None:
     }
 
     with pytest.raises(PreprocessingConfigurationError, match="reserve_output_tokens"):
+        PreprocessingConfig.from_input_payload(payload)
+
+
+def test_preprocessing_config_parses_smart_batch_settings() -> None:
+    payload = dict(_payload())
+    payload["config"] = {
+        "parsed_data": {
+            "preprocessing": {
+                "enabled": True,
+                "analysis_mode": "smart_batch",
+                "batch": {
+                    "max_chunks_per_skill": 3,
+                    "max_assessment_chunks_per_skill": 2,
+                    "max_batch_input_tokens": 900,
+                    "merge_strategy": "local_dedup",
+                },
+            }
+        }
+    }
+
+    config = PreprocessingConfig.from_input_payload(payload)
+
+    assert config.analysis_mode == "smart_batch"
+    assert config.batch.max_chunks_per_skill == 3
+    assert config.batch.max_assessment_chunks_per_skill == 2
+    assert config.batch.max_batch_input_tokens == 900
+
+
+def test_preprocessing_config_rejects_unknown_analysis_mode() -> None:
+    payload = dict(_payload())
+    payload["config"] = {"parsed_data": {"preprocessing": {"analysis_mode": "mystery"}}}
+
+    with pytest.raises(PreprocessingConfigurationError, match="analysis mode"):
         PreprocessingConfig.from_input_payload(payload)
 
 
@@ -374,6 +408,66 @@ def test_evidence_first_prompt_omits_full_raw_course_text() -> None:
 
     assert "Selected evidence chunks:" in prompt
     assert "UNIQUE_RAW_TAIL_SHOULD_NOT_APPEAR" not in prompt
+
+
+def test_smart_batch_builds_profiles_batches_and_chunk_coverage() -> None:
+    payload = _markdown_assessment_support_payload()
+    context = prepare_analysis_context(
+        payload,
+        config=PreprocessingConfig(
+            enabled=True,
+            analysis_mode="smart_batch",
+            batch=BatchConfig(max_chunks_per_skill=2, max_assessment_chunks_per_skill=2),
+        ),
+    )
+
+    assert context["analysis_mode"] == "smart_batch"
+    assert context["course_profiles"]["course_a"]["description"]
+    assert context["skill_batches"]
+    assert context["metrics"]["planned_batches"] == len(context["skill_batches"])
+    assert "chunk_coverage_counts" in context["metrics"]
+    assert all(
+        status in {"assigned_to_skill_batch", "assigned_to_general_batch", "profile_only", "omitted_with_reason"}
+        for statuses in context["metrics"]["chunk_coverage"].values()
+        for status in statuses.values()
+    )
+
+
+def test_smart_batch_splits_when_full_batch_prompt_exceeds_budget() -> None:
+    context = prepare_analysis_context(
+        _payload_with_raw_tail("python_basics " * 120),
+        config=PreprocessingConfig(
+            enabled=True,
+            analysis_mode="smart_batch",
+            batch=BatchConfig(max_batch_input_tokens=900, max_chunks_per_skill=6),
+            chunking=ChunkingConfig(max_chunk_chars=240, min_chunk_tokens=20),
+        ),
+    )
+
+    assert context["metrics"]["split_batches"] > 0
+    assert all(batch["estimated_prompt_tokens"] <= 900 for batch in context["skill_batches"])
+
+
+def test_smart_batch_matches_assessment_by_alias_without_explicit_skill_id() -> None:
+    payload = _payload()
+    payload["assessments"] = {
+        "source_path": "assessments.md",
+        "format": "markdown",
+        "raw_text": "# Assessments\n\n## Practical task\n\nStudents solve a Python basics exercise.\n",
+        "normalized_text": "# Assessments\n\n## Practical task\n\nStudents solve a Python basics exercise.",
+    }
+
+    context = prepare_analysis_context(
+        payload,
+        config=PreprocessingConfig(enabled=True, analysis_mode="smart_batch"),
+    )
+
+    assessment_batches = [
+        batch
+        for batch in context["skill_batches"]
+        if "python_basics" in batch.get("skill_ids", []) and batch.get("assessment_chunk_ids")
+    ]
+    assert assessment_batches
 
 
 def test_pipeline_rejects_oversized_legacy_prompt_before_provider(

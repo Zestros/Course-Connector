@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from course_connector.input_layer import InputLayerError, load_input_payload
-from course_connector.pipeline import run_pipeline
+from course_connector.pipeline import run_pipeline_with_progress
 from course_connector.preprocessing_layer.config import PreprocessingConfigurationError
 
 
@@ -67,13 +67,37 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
         parser.exit(2, f"Error: {exc}\n")
 
     try:
-        result = run_pipeline(input_payload, output_dir=args.output_dir)
+        result = run_pipeline_with_progress(
+            input_payload,
+            output_dir=args.output_dir,
+            progress_callback=_print_progress,
+        )
     except PreprocessingConfigurationError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print("Pipeline completed.")
     print(f"Markdown report: {result.report_md}")
     print(f"JSON result: {result.result_json}")
     return 0
+
+
+def _print_progress(event: dict[str, object]) -> None:
+    event_name = event.get("event")
+    if event_name == "batch_start":
+        skill_ids = ", ".join(str(skill_id) for skill_id in event.get("skill_ids", []) or [])
+        label = skill_ids or str(event.get("batch_type") or "batch")
+        print(
+            f"Smart batch {event.get('index')}/{event.get('total')} started: "
+            f"{event.get('batch_id')} ({label}, ~{event.get('estimated_prompt_tokens')} tokens)",
+            file=sys.stderr,
+            flush=True,
+        )
+    elif event_name == "batch_complete":
+        print(
+            f"Smart batch {event.get('index')}/{event.get('total')} finished: "
+            f"{event.get('batch_id')} [{event.get('status')}]",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

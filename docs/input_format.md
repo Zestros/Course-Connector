@@ -104,6 +104,8 @@ Markdown course files are treated as text, but they still need a title heading a
 
 Headings are used as coarse sections for chunking when preprocessing is enabled.
 
+For `preprocessing.analysis_mode: smart_batch`, explicit skill ids improve coverage. Put skill ids from `skill_dictionary` in competencies, learning outcomes, module descriptions, assessment descriptions, or evidence text when possible. If an assessment does not include an exact skill id, smart batch planning can match by skill aliases and assessment text, but uncertain matches are reported as warnings rather than treated as authoritative evidence.
+
 ## Skill Dictionary
 
 Supported extensions:

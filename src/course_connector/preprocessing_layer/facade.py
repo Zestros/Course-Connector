@@ -7,8 +7,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+from course_connector.preprocessing_layer.batch_planner import plan_skill_batches
 from course_connector.preprocessing_layer.chunking import build_chunks
 from course_connector.preprocessing_layer.config import PreprocessingConfig
+from course_connector.preprocessing_layer.course_profiles import build_course_profiles
 from course_connector.preprocessing_layer.retrieval import retrieve_pairs
 from course_connector.preprocessing_layer.token_budget import apply_chunk_sizing_policy, apply_token_budget
 
@@ -25,12 +27,18 @@ def prepare_analysis_context(
     if not config.enabled:
         return {
             "enabled": False,
-            "mode": "disabled",
+            "mode": "full_input",
+            "analysis_mode": "full_input",
             "input_payload": input_payload,
             "chunks": {"course_a": [], "course_b": [], "skill_dictionary": [], "assessments": []},
             "retrieved_pairs": [],
+            "course_profiles": {},
+            "skill_batches": [],
+            "batch_results": [],
+            "merged_findings": [],
             "evidence_refs": {},
             "metrics": {
+                "analysis_mode": "full_input",
                 "chunks_course_a": 0,
                 "chunks_course_b": 0,
                 "chunks_assessments": 0,
@@ -44,12 +52,29 @@ def prepare_analysis_context(
 
     effective_config, sizing_metrics, sizing_warnings = apply_chunk_sizing_policy(config)
     chunks, chunk_warnings = build_chunks(input_payload, effective_config.chunking)
-    pairs, retrieval_warnings = retrieve_pairs(chunks, effective_config)
-    pairs, budget_metrics, budget_warnings = apply_token_budget(pairs, effective_config)
-    selected_chunks = _selected_chunks(chunks, pairs)
+    profile_data, profile_warnings = build_course_profiles(input_payload, chunks)
+    if effective_config.analysis_mode == "smart_batch":
+        pairs = []
+        retrieval_warnings = []
+        budget_metrics = sizing_metrics
+        budget_warnings = []
+        selected_chunks = []
+        skill_batches, batch_metrics, batch_warnings = plan_skill_batches(
+            input_payload,
+            chunks,
+            profile_data,
+            effective_config,
+        )
+    else:
+        pairs, retrieval_warnings = retrieve_pairs(chunks, effective_config)
+        pairs, budget_metrics, budget_warnings = apply_token_budget(pairs, effective_config)
+        selected_chunks = _selected_chunks(chunks, pairs)
+        skill_batches = []
+        batch_metrics = {}
+        batch_warnings = []
     evidence_refs = _evidence_refs(chunks, pairs)
     evidence_warnings = []
-    if not selected_chunks and not pairs:
+    if not selected_chunks and not pairs and not skill_batches:
         evidence_warnings.append(
             "no_evidence_selected: preprocessing did not select evidence chunks; "
             "the pipeline will use a budget-validated fallback context if it fits."
@@ -57,24 +82,41 @@ def prepare_analysis_context(
     metrics = {
         **sizing_metrics,
         **budget_metrics,
+        **batch_metrics,
+        "analysis_mode": effective_config.analysis_mode,
         "chunks_course_a": len(chunks.get("course_a", [])),
         "chunks_course_b": len(chunks.get("course_b", [])),
         "chunks_assessments": len(chunks.get("assessments", [])),
         "selected_chunks": len(selected_chunks),
         "retrieved_pairs": len(pairs),
+        "skill_batches": len(skill_batches),
+        "merge_strategy": effective_config.batch.merge_strategy,
         "retrieval_mode": effective_config.retrieval.mode if effective_config.retrieval.enabled else "none",
         "embedding_model": effective_config.embeddings.model if effective_config.embeddings.enabled else None,
     }
     return {
         "enabled": True,
-        "mode": metrics["retrieval_mode"],
+        "mode": effective_config.analysis_mode,
+        "analysis_mode": effective_config.analysis_mode,
         "input_payload": input_payload,
         "chunks": chunks,
+        "course_profiles": profile_data,
         "selected_chunks": selected_chunks,
         "retrieved_pairs": pairs,
+        "skill_batches": skill_batches,
+        "batch_results": [],
+        "merged_findings": [],
         "evidence_refs": evidence_refs,
         "metrics": metrics,
-        "warnings": [*sizing_warnings, *chunk_warnings, *retrieval_warnings, *budget_warnings, *evidence_warnings],
+        "warnings": [
+            *sizing_warnings,
+            *chunk_warnings,
+            *profile_warnings,
+            *retrieval_warnings,
+            *budget_warnings,
+            *batch_warnings,
+            *evidence_warnings,
+        ],
         "write_intermediate_outputs": effective_config.write_intermediate_outputs,
     }
 
@@ -89,12 +131,20 @@ def write_intermediate_outputs(output_dir: Path, analysis_context: dict[str, Any
         "chunks_course_b": output_dir / "chunks_course_b.json",
         "selected_chunks": output_dir / "selected_chunks.json",
         "retrieved_pairs": output_dir / "retrieved_pairs.json",
+        "course_profiles": output_dir / "course_profiles.json",
+        "skill_batches": output_dir / "skill_batches.json",
+        "batch_results": output_dir / "batch_results.json",
+        "merged_findings": output_dir / "merged_findings.json",
         "preprocessing_summary": output_dir / "preprocessing_summary.json",
     }
     outputs["chunks_course_a"].write_text(_json(chunks.get("course_a", [])), encoding="utf-8")
     outputs["chunks_course_b"].write_text(_json(chunks.get("course_b", [])), encoding="utf-8")
     outputs["selected_chunks"].write_text(_json(analysis_context.get("selected_chunks", [])), encoding="utf-8")
     outputs["retrieved_pairs"].write_text(_json(analysis_context.get("retrieved_pairs", [])), encoding="utf-8")
+    outputs["course_profiles"].write_text(_json(analysis_context.get("course_profiles", {})), encoding="utf-8")
+    outputs["skill_batches"].write_text(_json(analysis_context.get("skill_batches", [])), encoding="utf-8")
+    outputs["batch_results"].write_text(_json(analysis_context.get("batch_results", [])), encoding="utf-8")
+    outputs["merged_findings"].write_text(_json(analysis_context.get("merged_findings", [])), encoding="utf-8")
     outputs["preprocessing_summary"].write_text(
         _json({
             "enabled": analysis_context.get("enabled"),

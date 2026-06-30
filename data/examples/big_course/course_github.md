@@ -196,3 +196,53 @@ GitHub repository часто содержит конфигурацию, CI и с
 - Protected branch не обходится вручную.
 - Secrets не публикуются в repository.
 - Отчет объясняет, как локальная ветка, remote branch, PR и CI связаны в одном workflow.
+
+## Description
+
+Structured validation summary: this Markdown course teaches GitHub collaboration through `github_remote_sync`, `github_issue_planning`, `github_pull_request_workflow`, `github_code_review`, `github_actions_ci`, `github_branch_protection`, and `github_repository_security`.
+
+## Topics
+
+- Remote synchronization with GitHub: `github_remote_sync`
+- Issue planning and acceptance criteria: `github_issue_planning`
+- Pull request workflow: `github_pull_request_workflow`
+- Code review practice: `github_code_review`
+- GitHub Actions checks and CI: `github_actions_ci`
+- Branch protection rules: `github_branch_protection`
+- Repository security and secrets: `github_repository_security`
+
+## Learning Outcomes
+
+- Connect a local repository to GitHub and synchronize branches using `github_remote_sync`.
+- Write issues with acceptance criteria using `github_issue_planning`.
+- Open and update pull requests with `github_pull_request_workflow`.
+- Review another pull request with concrete feedback using `github_code_review`.
+- Diagnose failed checks in GitHub Actions using `github_actions_ci`.
+- Work under protected branch rules using `github_branch_protection`.
+- Keep tokens and secrets out of the repository using `github_repository_security`.
+
+## Competencies
+
+- `github_remote_sync`
+- `github_issue_planning`
+- `github_pull_request_workflow`
+- `github_code_review`
+- `github_actions_ci`
+- `github_branch_protection`
+- `github_repository_security`
+
+## Assessments
+
+- Remote setup task checks `github_remote_sync`.
+- Issue and PR task checks `github_issue_planning` and `github_pull_request_workflow`.
+- Review task checks `github_code_review`.
+- CI and protection task checks `github_actions_ci` and `github_branch_protection`.
+- Security checklist checks `github_repository_security`.
+
+## Evidence
+
+- Student submits repository remote output, branch state, and PR link for `github_remote_sync` and `github_pull_request_workflow`.
+- Student submits issue text with acceptance criteria for `github_issue_planning`.
+- Student submits review comments and responses for `github_code_review`.
+- Student submits GitHub Actions run evidence and branch protection settings for `github_actions_ci` and `github_branch_protection`.
+- Student submits a secrets checklist and `.gitignore` evidence for `github_repository_security`.

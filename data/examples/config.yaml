@@ -5,6 +5,7 @@ llm:
   output_language: ru
 preprocessing:
   enabled: true
+  analysis_mode: retrieval_single_shot
   write_intermediate_outputs: true
   retrieval:
     enabled: true

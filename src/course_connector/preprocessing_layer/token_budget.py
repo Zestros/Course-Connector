@@ -153,7 +153,8 @@ def validate_prompt_size(estimated_tokens: int, config: PreprocessingConfig, cod
     if code == "input_too_large_without_chunking":
         message = (
             "Input is too large for the configured model context without chunking. "
-            "Enable `preprocessing.enabled` and `preprocessing.chunking.enabled`, "
+            "Enable `preprocessing.enabled` with `preprocessing.analysis_mode: smart_batch`, "
+            "or enable `preprocessing.chunking.enabled`, "
             "or increase `preprocessing.token_budget.max_input_tokens`."
         )
     else:
