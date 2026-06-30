@@ -30,6 +30,7 @@ def analyze_batches(
     evidence_roles = _evidence_roles(preprocessing)
     batch_results: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
+    deterministic_findings: list[dict[str, Any]] = []
     warnings = list(analysis_payload.get("warnings") or [])
 
     total_batches = len(batches)
@@ -58,6 +59,9 @@ def analyze_batches(
                 },
             )
             continue
+        deterministic_gap = _deterministic_gap_from_batch(batch)
+        if deterministic_gap is not None:
+            deterministic_findings.append(deterministic_gap)
         _emit_progress(
             progress_callback,
             {
@@ -120,7 +124,7 @@ def analyze_batches(
             },
         )
 
-    merged = merge_findings(findings)
+    merged = merge_findings([*findings, *deterministic_findings])
     summary = _summary(merged, batch_results)
     if preprocessing.get("metrics", {}).get("merge_strategy") == "llm_synthesis" and merged:
         try:
@@ -226,6 +230,104 @@ def _filter_cross_course_findings(
             f"Batch `{batch_id}` {finding.get('type')} finding without Course A and Course B evidence was skipped."
         )
     return result
+
+
+def _deterministic_gap_from_batch(batch: dict[str, Any]) -> dict[str, Any] | None:
+    """Create an evidence-backed gap when Course B has a skill but Course A has no teaching chunks."""
+    if batch.get("batch_type") != "skill":
+        return None
+    course_a_chunks = list(batch.get("course_a_chunks") or [])
+    if course_a_chunks and not _course_a_chunks_are_context_only(course_a_chunks):
+        return None
+    course_b_chunks = list(batch.get("course_b_chunks") or [])
+    assessment_chunks = list(batch.get("assessment_chunks") or [])
+    if not course_b_chunks and not assessment_chunks:
+        return None
+    skill_ids = [str(skill_id) for skill_id in batch.get("skill_ids") or []]
+    if not skill_ids:
+        return None
+    skill_title = _skill_title(batch, skill_ids[0])
+    absence_fragment, absence_ref = _course_a_absence_evidence(batch)
+    course_b_fragment = _first_chunk_text(course_b_chunks or assessment_chunks)
+    evidence_refs = []
+    if absence_ref:
+        evidence_refs.append(absence_ref)
+    evidence_refs.extend(
+        str(chunk.get("chunk_id"))
+        for chunk in [*course_b_chunks[:2], *assessment_chunks[:1]]
+        if chunk.get("chunk_id")
+    )
+    if not evidence_refs:
+        return None
+    return {
+        "type": "probable_gap",
+        "course_a_fragment": absence_fragment,
+        "course_b_fragment": course_b_fragment,
+        "explanation": (
+            f"Course B требует навык `{skill_ids[0]}` ({skill_title}), но в Course A нет обучающих chunks "
+            "по этому skill; Course A дает только общий контекст или prerequisite-основу."
+        ),
+        "confidence": 0.86,
+        "skill_ids": skill_ids,
+        "evidence_refs": evidence_refs,
+        "batch_id": str(batch.get("batch_id") or ""),
+    }
+
+
+def _skill_title(batch: dict[str, Any], skill_id: str) -> str:
+    for skill in batch.get("skill_dictionary_subset") or []:
+        if isinstance(skill, dict) and str(skill.get("id") or "") == skill_id:
+            return str(skill.get("title") or skill_id)
+    return skill_id
+
+
+def _course_a_absence_evidence(batch: dict[str, Any]) -> tuple[str, str | None]:
+    profile = batch.get("course_profiles", {}).get("course_a", {})
+    if not isinstance(profile, dict):
+        return "Course A does not include teaching chunks for this skill.", None
+    excluded_topics = [str(item) for item in profile.get("excluded_topics") or [] if item]
+    if excluded_topics:
+        return excluded_topics[0], _profile_ref(profile, preferred_index=0)
+    description = str(profile.get("description") or "")
+    if description:
+        return description, _profile_ref(profile, preferred_index=0)
+    return "Course A does not include teaching chunks for this skill.", _profile_ref(profile, preferred_index=0)
+
+
+def _profile_ref(profile: dict[str, Any], *, preferred_index: int) -> str | None:
+    refs = [str(ref) for ref in profile.get("profile_chunk_ids") or [] if ref]
+    if not refs:
+        return None
+    if preferred_index < len(refs):
+        return refs[preferred_index]
+    return refs[0]
+
+
+def _first_chunk_text(chunks: list[dict[str, Any]]) -> str:
+    if not chunks:
+        return ""
+    return str(chunks[0].get("text") or chunks[0].get("title") or "")
+
+
+def _course_a_chunks_are_context_only(chunks: list[dict[str, Any]]) -> bool:
+    if not chunks:
+        return False
+    return all(_is_context_only_text(str(chunk.get("text") or "")) for chunk in chunks)
+
+
+def _is_context_only_text(text: str) -> bool:
+    normalized = text.lower()
+    markers = (
+        "только как контекст",
+        "не являются основным предметом",
+        "не является основным предметом",
+        "не обучает",
+        "only as context",
+        "not the main subject",
+        "does not teach",
+        "not covered",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 def _summary(relations: list[dict[str, Any]], batch_results: list[dict[str, Any]]) -> str:

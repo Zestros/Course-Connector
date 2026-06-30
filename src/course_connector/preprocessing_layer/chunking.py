@@ -409,13 +409,22 @@ def _valid_skill_ids(skill_ids: Any, skill_index: dict[str, dict[str, Any]]) -> 
 
 
 def _infer_skill_ids(text: str, skill_index: dict[str, dict[str, Any]]) -> list[str]:
-    lower = text.lower()
     result = []
     for skill_id, skill in skill_index.items():
         candidates = [skill_id, skill.get("title", ""), *skill.get("aliases", [])]
-        if any(str(candidate).lower().strip() and str(candidate).lower().strip() in lower for candidate in candidates):
+        if any(_candidate_matches(text, str(candidate)) for candidate in candidates):
             result.append(skill_id)
     return result
+
+
+def _candidate_matches(text: str, candidate: str) -> bool:
+    candidate = candidate.strip()
+    if not candidate:
+        return False
+    if candidate.lower() == "workflow":
+        lower = text.lower()
+        return "github actions" in lower or ".github/workflows" in lower
+    return re.search(rf"(?<![\w-]){re.escape(candidate)}(?![\w-])", text, flags=re.IGNORECASE) is not None
 
 
 def _skill_titles(skill_ids: list[str], skill_index: dict[str, dict[str, Any]]) -> list[str]:
