@@ -6,6 +6,7 @@ Return only valid JSON. Do not wrap the JSON in Markdown.
 Write all natural-language JSON values in {output_language}.
 Use only the provided course profiles, skill dictionary subset, course chunks and assessment chunks.
 Do not invent evidence references.
+Do not return useful_repetition or probable_duplication findings unless evidence_refs include at least one Course A chunk and at least one Course B chunk.
 
 Required JSON response format:
 {response_schema}

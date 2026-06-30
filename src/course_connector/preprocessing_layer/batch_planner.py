@@ -160,7 +160,7 @@ def _general_batches(
             coverage[role][chunk_id] = "assigned_to_general_batch"
             general.append(chunk)
         for index, slice_items in enumerate(_chunk_slices(general, config.batch.max_chunks_per_skill), start=1):
-            batches.extend(_split_to_budget(
+            planned = _split_to_budget(
                 _batch(
                     batch_id=f"general_{role}_{index:03d}",
                     batch_type="general",
@@ -173,7 +173,10 @@ def _general_batches(
                 ),
                 config,
                 [],
-            ))
+            )
+            for batch in planned:
+                batch["diagnostic_only"] = True
+            batches.extend(planned)
     return batches
 
 

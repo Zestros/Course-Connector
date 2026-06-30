@@ -27,6 +27,7 @@ def analyze_batches(
     provider = provider or create_provider(config)
     preprocessing = analysis_payload.get("preprocessing") if isinstance(analysis_payload.get("preprocessing"), dict) else {}
     batches = list(preprocessing.get("skill_batches") or [])
+    evidence_roles = _evidence_roles(preprocessing)
     batch_results: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
     warnings = list(analysis_payload.get("warnings") or [])
@@ -34,6 +35,29 @@ def analyze_batches(
     total_batches = len(batches)
     for index, batch in enumerate(batches, start=1):
         batch_id = str(batch.get("batch_id") or "unknown_batch")
+        if batch.get("diagnostic_only"):
+            batch_result = {
+                "batch_id": batch_id,
+                "status": "diagnostic_only",
+                "summary": "Diagnostic-only batch was not sent to the LLM relation analyzer.",
+                "findings": [],
+                "warnings": [],
+            }
+            batch_results.append(batch_result)
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": "batch_complete",
+                    "batch_id": batch_id,
+                    "batch_type": batch.get("batch_type"),
+                    "skill_ids": list(batch.get("skill_ids") or []),
+                    "index": index,
+                    "total": total_batches,
+                    "status": "diagnostic_only",
+                    "result": batch_result,
+                },
+            )
+            continue
         _emit_progress(
             progress_callback,
             {
@@ -71,6 +95,7 @@ def analyze_batches(
             continue
         batch_warnings = [str(warning) for warning in parsed.get("warnings") or []]
         normalized = _normalize_batch_findings(parsed.get("findings") or [], batch_id, batch_warnings)
+        normalized = _filter_cross_course_findings(normalized, batch_id, evidence_roles, batch_warnings)
         batch_result = {
             "batch_id": batch_id,
             "status": "completed",
@@ -110,13 +135,18 @@ def analyze_batches(
             synthesis_warnings = [*warnings, *list(synthesis.get("warnings") or [])]
             synthesized_relations = normalize_relations(synthesis.get("relations") or [], synthesis_warnings)
             if synthesized_relations:
-                merged = _filter_allowed_evidence_refs(synthesized_relations, merged, synthesis_warnings)
+                merged = _filter_allowed_evidence_refs(
+                    synthesized_relations,
+                    merged,
+                    evidence_roles,
+                    synthesis_warnings,
+                )
                 summary = str(synthesis.get("summary") or summary)
             warnings = synthesis_warnings
         except Exception as exc:
             warnings.append(f"Final findings synthesis failed: {exc}")
     analysis = {
-        "status": "completed" if findings else "provider_error" if batch_results else "completed",
+        "status": _analysis_status(batch_results),
         "summary": summary,
         "relations": merged,
         "warnings": _dedupe(warnings),
@@ -128,8 +158,13 @@ def analyze_batches(
         "merged_findings": merged,
         "metrics": {
             **dict(preprocessing.get("metrics") or {}),
-            "executed_batches": len(batch_results),
-            "failed_batches": len([result for result in batch_results if result.get("status") != "completed"]),
+            "diagnostic_only_batches": len([
+                result for result in batch_results if result.get("status") == "diagnostic_only"
+            ]),
+            "executed_batches": len([
+                result for result in batch_results if result.get("status") != "diagnostic_only"
+            ]),
+            "failed_batches": len([result for result in batch_results if result.get("status") == "provider_error"]),
         },
     }
     return analysis, context_updates
@@ -172,16 +207,52 @@ def _normalize_batch_findings(
     return normalize_relations(enriched, warnings)
 
 
+def _filter_cross_course_findings(
+    findings: list[dict[str, Any]],
+    batch_id: str,
+    evidence_roles: dict[str, str],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    result = []
+    for finding in findings:
+        if finding.get("type") not in {"useful_repetition", "probable_duplication"}:
+            result.append(finding)
+            continue
+        roles = {_evidence_role(ref, evidence_roles) for ref in finding.get("evidence_refs", [])}
+        if {"course_a", "course_b"} <= roles:
+            result.append(finding)
+            continue
+        warnings.append(
+            f"Batch `{batch_id}` {finding.get('type')} finding without Course A and Course B evidence was skipped."
+        )
+    return result
+
+
 def _summary(relations: list[dict[str, Any]], batch_results: list[dict[str, Any]]) -> str:
     if not batch_results:
         return "Smart batch analysis did not plan any batches."
-    completed = len([result for result in batch_results if result.get("status") == "completed"])
-    return f"Smart batch analysis completed {completed}/{len(batch_results)} batches and returned {len(relations)} merged relation candidates."
+    attempted = [result for result in batch_results if result.get("status") != "diagnostic_only"]
+    completed = len([result for result in attempted if result.get("status") == "completed"])
+    diagnostic_only = len(batch_results) - len(attempted)
+    suffix = f" Skipped {diagnostic_only} diagnostic-only batches." if diagnostic_only else ""
+    return (
+        f"Smart batch analysis completed {completed}/{len(attempted)} LLM batches "
+        f"and returned {len(relations)} merged relation candidates."
+        f"{suffix}"
+    )
+
+
+def _analysis_status(batch_results: list[dict[str, Any]]) -> str:
+    attempted = [result for result in batch_results if result.get("status") != "diagnostic_only"]
+    if attempted and all(result.get("status") == "provider_error" for result in attempted):
+        return "provider_error"
+    return "completed"
 
 
 def _filter_allowed_evidence_refs(
     synthesized: list[dict[str, Any]],
     source_findings: list[dict[str, Any]],
+    evidence_roles: dict[str, str],
     warnings: list[str],
 ) -> list[dict[str, Any]]:
     allowed = {_ref_key(ref) for finding in source_findings for ref in finding.get("evidence_refs", [])}
@@ -191,10 +262,48 @@ def _filter_allowed_evidence_refs(
         if not refs:
             warnings.append("Final synthesis relation without allowed evidence_refs was skipped.")
             continue
+        if relation.get("type") in {"useful_repetition", "probable_duplication"}:
+            roles = {_evidence_role(ref, evidence_roles) for ref in refs}
+            if not {"course_a", "course_b"} <= roles:
+                warnings.append("Final synthesis relation without Course A and Course B evidence was skipped.")
+                continue
         item = dict(relation)
         item["evidence_refs"] = refs
         filtered.append(item)
     return filtered
+
+
+def _evidence_roles(preprocessing: dict[str, Any]) -> dict[str, str]:
+    roles: dict[str, str] = {}
+    evidence_refs = preprocessing.get("evidence_refs")
+    chunk_refs = evidence_refs.get("chunks", {}) if isinstance(evidence_refs, dict) else {}
+    if isinstance(chunk_refs, dict):
+        for chunk_id, ref in chunk_refs.items():
+            if isinstance(ref, dict) and ref.get("source_role"):
+                roles[str(chunk_id)] = str(ref["source_role"])
+    for batch in preprocessing.get("skill_batches") or []:
+        for role in ("course_a", "course_b", "assessments"):
+            for chunk_id in batch.get(f"{role}_chunk_ids", []) or []:
+                roles.setdefault(str(chunk_id), role)
+    return roles
+
+
+def _evidence_role(ref: Any, evidence_roles: dict[str, str]) -> str:
+    if isinstance(ref, dict):
+        role = ref.get("source_role")
+        if role:
+            return str(role)
+        ref = ref.get("chunk_id") or ref
+    key = str(ref)
+    if key in evidence_roles:
+        return evidence_roles[key]
+    if key.startswith("course_a_"):
+        return "course_a"
+    if key.startswith("course_b_"):
+        return "course_b"
+    if key.startswith("assessments_"):
+        return "assessments"
+    return "unknown"
 
 
 def _ref_key(ref: Any) -> str:

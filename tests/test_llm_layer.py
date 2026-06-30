@@ -274,6 +274,79 @@ def test_batch_analyzer_preserves_successful_results_when_one_batch_fails() -> N
     assert any("batch_002" in warning for warning in analysis["warnings"])
 
 
+def test_batch_analyzer_skips_diagnostic_only_batches_without_provider_call() -> None:
+    class CountingProvider(StaticLLMProvider):
+        def __init__(self) -> None:
+            super().__init__(json.dumps({"summary": "", "findings": [], "warnings": []}))
+            self.calls = 0
+
+        def generate(self, prompt: str):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            return super().generate(prompt)
+
+    provider = CountingProvider()
+    batch = _batch("general_course_b_001")
+    batch["diagnostic_only"] = True
+    payload = _payload()
+    payload["preprocessing"] = {
+        "enabled": True,
+        "analysis_mode": "smart_batch",
+        "skill_batches": [batch],
+        "metrics": {},
+    }
+
+    analysis, updates = analyze_batches(payload, provider=provider)
+
+    assert provider.calls == 0
+    assert analysis["status"] == "completed"
+    assert analysis["relations"] == []
+    assert updates["batch_results"][0]["status"] == "diagnostic_only"
+    assert updates["metrics"]["diagnostic_only_batches"] == 1
+    assert updates["metrics"]["executed_batches"] == 0
+
+
+def test_batch_analyzer_filters_one_sided_repetition_findings() -> None:
+    response = json.dumps({
+        "summary": "batch ok",
+        "findings": [
+            {
+                "type": "useful_repetition",
+                "course_a_fragment": "",
+                "course_b_fragment": "B",
+                "explanation": "Internal repeat",
+                "confidence": 0.9,
+                "skill_ids": ["skill_a"],
+                "evidence_refs": ["chunk_b"],
+            },
+            {
+                "type": "useful_repetition",
+                "course_a_fragment": "A",
+                "course_b_fragment": "B",
+                "explanation": "Cross-course repeat",
+                "confidence": 0.8,
+                "skill_ids": ["skill_a"],
+                "evidence_refs": ["chunk_a", "chunk_b"],
+            },
+        ],
+        "warnings": [],
+    })
+    payload = _payload()
+    payload["preprocessing"] = {
+        "enabled": True,
+        "analysis_mode": "smart_batch",
+        "skill_batches": [_batch("batch_001")],
+        "metrics": {},
+    }
+
+    analysis, updates = analyze_batches(payload, provider=StaticLLMProvider(response))
+
+    assert len(analysis["relations"]) == 1
+    assert analysis["relations"][0]["explanation"] == "Cross-course repeat"
+    assert len(updates["batch_results"][0]["findings"]) == 1
+    assert updates["batch_results"][0]["findings"][0]["explanation"] == "Cross-course repeat"
+    assert any("without Course A and Course B evidence" in warning for warning in analysis["warnings"])
+
+
 def test_findings_merge_keeps_distinct_skills_separate() -> None:
     findings = [
         {
