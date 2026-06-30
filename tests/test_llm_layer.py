@@ -24,10 +24,16 @@ from course_connector.llm_layer import (
     build_prompt,
     build_prompt_context,
 )
+from course_connector.llm_layer.batch_analyzer import analyze_batches
+from course_connector.llm_layer.findings_merge import merge_findings
 from course_connector.llm_layer.parsing import normalize_relations, parse_provider_response
-from course_connector.llm_layer.providers.factory import create_provider
 from course_connector.llm_layer.providers import openrouter_provider as openrouter_module
+from course_connector.llm_layer.providers import openai_provider as openai_module
+from course_connector.llm_layer.providers import routerai_provider as routerai_module
+from course_connector.llm_layer.providers.factory import create_provider
+from course_connector.llm_layer.providers.openai_provider import OpenAIProvider
 from course_connector.llm_layer.providers.openrouter_provider import OpenRouterProvider
+from course_connector.llm_layer.providers.routerai_provider import RouterAIProvider
 
 
 class FailingProvider(StaticLLMProvider):
@@ -70,6 +76,53 @@ def test_prompt_uses_configured_output_language() -> None:
 
     assert "Write all natural-language JSON values in Russian." in russian_prompt
     assert "Write all natural-language JSON values in English." in english_prompt
+
+
+def test_strict_evidence_prompt_requires_pair_level_findings() -> None:
+    payload = _payload()
+    payload["preprocessing"] = {
+        "enabled": True,
+        "selected_chunks": [
+            {
+                "chunk_id": "course_a_section_001",
+                "source_role": "course_a",
+                "source_path": "course_a.md",
+                "source_type": "raw_section",
+                "title": "Practice",
+                "text": "Course A teaches git_status_diff.",
+                "skill_ids": ["git_status_diff"],
+                "locator": {"kind": "line_range", "line_start": 1, "line_end": 3},
+            }
+        ],
+        "retrieved_pairs": [
+            {
+                "pair_id": "retrieved_001",
+                "candidate_relation_hint": "useful_repetition_candidate",
+                "retrieval_reason": "keyword retrieval",
+                "course_a_chunk_id": "course_a_section_001",
+                "course_b_chunk_id": "course_b_section_001",
+                "course_a_title": "Practice",
+                "course_b_title": "Review",
+                "course_a_text": "Course A teaches git_status_diff.",
+                "course_b_text": "Course B reviews pull request diffs.",
+                "matched_skill_ids": ["git_status_diff"],
+                "evidence_refs": [{"chunk_id": "course_a_section_001"}],
+            }
+        ],
+        "metrics": {"retrieved_pairs": 1, "selected_chunks": 1},
+    }
+
+    prompt = build_prompt(
+        build_prompt_context(payload),
+        template_name="strict_evidence_analysis_prompt.md",
+    )
+
+    assert "Inspect every retrieved evidence pair before writing the answer." in prompt
+    assert "Do not collapse different skills" in prompt
+    assert "Prefer 4 to 8 relations" in prompt
+    assert "Each relation must cite evidence_refs" in prompt
+    assert "retrieved_001" in prompt
+    assert "git_status_diff" in prompt
 
 
 def test_valid_provider_json_is_parsed_and_normalized() -> None:
@@ -164,6 +217,157 @@ def test_context_builder_uses_input_payload_without_file_paths() -> None:
     assert context["course_a"]["source_path"] == "/tmp/deleted-course-a.yaml"
 
 
+def test_full_input_context_does_not_truncate_after_legacy_preview_limit() -> None:
+    payload = _payload()
+    tail_marker = "TAIL_SKILL_AFTER_1200_CHARS"
+    long_text = "# Course A\n" + ("filler text " * 180) + tail_marker
+    payload["course_a"]["normalized_text"] = long_text
+
+    prompt = build_prompt(build_prompt_context(payload))
+
+    assert tail_marker in prompt
+
+
+def test_batch_analyzer_preserves_successful_results_when_one_batch_fails() -> None:
+    class OneFailureProvider(StaticLLMProvider):
+        def __init__(self) -> None:
+            super().__init__("")
+            self.calls = 0
+
+        def generate(self, prompt: str):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("simulated reset")
+            return super().generate(prompt)
+
+    response = json.dumps({
+        "summary": "batch ok",
+        "findings": [
+            {
+                "type": "probable_gap",
+                "course_a_fragment": "A",
+                "course_b_fragment": "B",
+                "explanation": "E",
+                "confidence": 0.7,
+                "skill_ids": ["skill_a"],
+                "evidence_refs": ["chunk_a"],
+            }
+        ],
+        "warnings": [],
+    })
+    provider = OneFailureProvider()
+    provider.text = response
+    payload = _payload()
+    payload["preprocessing"] = {
+        "enabled": True,
+        "analysis_mode": "smart_batch",
+        "skill_batches": [_batch("batch_001"), _batch("batch_002")],
+        "metrics": {},
+    }
+
+    analysis, updates = analyze_batches(payload, provider=provider)
+
+    assert len(analysis["relations"]) == 1
+    assert analysis["relations"][0]["batch_id"] == "batch_001"
+    assert updates["metrics"]["executed_batches"] == 2
+    assert updates["metrics"]["failed_batches"] == 1
+    assert any("batch_002" in warning for warning in analysis["warnings"])
+
+
+def test_batch_analyzer_skips_diagnostic_only_batches_without_provider_call() -> None:
+    class CountingProvider(StaticLLMProvider):
+        def __init__(self) -> None:
+            super().__init__(json.dumps({"summary": "", "findings": [], "warnings": []}))
+            self.calls = 0
+
+        def generate(self, prompt: str):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            return super().generate(prompt)
+
+    provider = CountingProvider()
+    batch = _batch("general_course_b_001")
+    batch["diagnostic_only"] = True
+    payload = _payload()
+    payload["preprocessing"] = {
+        "enabled": True,
+        "analysis_mode": "smart_batch",
+        "skill_batches": [batch],
+        "metrics": {},
+    }
+
+    analysis, updates = analyze_batches(payload, provider=provider)
+
+    assert provider.calls == 0
+    assert analysis["status"] == "completed"
+    assert analysis["relations"] == []
+    assert updates["batch_results"][0]["status"] == "diagnostic_only"
+    assert updates["metrics"]["diagnostic_only_batches"] == 1
+    assert updates["metrics"]["executed_batches"] == 0
+
+
+def test_batch_analyzer_filters_one_sided_repetition_findings() -> None:
+    response = json.dumps({
+        "summary": "batch ok",
+        "findings": [
+            {
+                "type": "useful_repetition",
+                "course_a_fragment": "",
+                "course_b_fragment": "B",
+                "explanation": "Internal repeat",
+                "confidence": 0.9,
+                "skill_ids": ["skill_a"],
+                "evidence_refs": ["chunk_b"],
+            },
+            {
+                "type": "useful_repetition",
+                "course_a_fragment": "A",
+                "course_b_fragment": "B",
+                "explanation": "Cross-course repeat",
+                "confidence": 0.8,
+                "skill_ids": ["skill_a"],
+                "evidence_refs": ["chunk_a", "chunk_b"],
+            },
+        ],
+        "warnings": [],
+    })
+    payload = _payload()
+    payload["preprocessing"] = {
+        "enabled": True,
+        "analysis_mode": "smart_batch",
+        "skill_batches": [_batch("batch_001")],
+        "metrics": {},
+    }
+
+    analysis, updates = analyze_batches(payload, provider=StaticLLMProvider(response))
+
+    assert len(analysis["relations"]) == 1
+    assert analysis["relations"][0]["explanation"] == "Cross-course repeat"
+    assert len(updates["batch_results"][0]["findings"]) == 1
+    assert updates["batch_results"][0]["findings"][0]["explanation"] == "Cross-course repeat"
+    assert any("without Course A and Course B evidence" in warning for warning in analysis["warnings"])
+
+
+def test_findings_merge_keeps_distinct_skills_separate() -> None:
+    findings = [
+        {
+            "type": "probable_gap",
+            "skill_ids": ["skill_a"],
+            "evidence_refs": ["chunk_a"],
+            "confidence": 0.6,
+            "batch_id": "batch_a",
+        },
+        {
+            "type": "probable_gap",
+            "skill_ids": ["skill_b"],
+            "evidence_refs": ["chunk_b"],
+            "confidence": 0.8,
+            "batch_id": "batch_b",
+        },
+    ]
+
+    assert len(merge_findings(findings)) == 2
+
+
 def test_config_selects_mock_by_default() -> None:
     config = LLMConfig.from_input_payload(_payload())
 
@@ -171,9 +375,13 @@ def test_config_selects_mock_by_default() -> None:
     assert isinstance(create_provider(config), MockLLMProvider)
 
 
-def test_project_default_config_uses_openrouter_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_project_default_config_uses_openai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("COURSE_CONNECTOR_LLM_PROVIDER", raising=False)
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.delenv("COURSE_CONNECTOR_LLM_MODEL", raising=False)
+    monkeypatch.delenv("COURSE_CONNECTOR_LLM_API_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     config_path = PROJECT_ROOT / "configs" / "default.yaml"
     payload = _payload()
     payload["config"] = {
@@ -185,9 +393,11 @@ def test_project_default_config_uses_openrouter_provider(monkeypatch: pytest.Mon
 
     config = LLMConfig.from_input_payload(payload)
 
-    assert config.provider == "openrouter"
-    assert config.api_key_file == Path("LLM_apikey/key.txt")
-    assert isinstance(create_provider(config), OpenRouterProvider)
+    assert config.provider == "openai"
+    assert config.model == "gpt-5.4-mini"
+    assert config.api_key_file == Path("LLM_apikey/openai-key.txt")
+    assert config.api_base_url == "https://api.openai.com/v1"
+    assert isinstance(create_provider(config), OpenAIProvider)
 
 
 def test_config_can_select_openrouter_without_changing_input_boundary() -> None:
@@ -215,6 +425,60 @@ def test_config_can_select_openrouter_without_changing_input_boundary() -> None:
     assert config.temperature == 0.1
     assert config.output_language == "en"
     assert isinstance(provider, OpenRouterProvider)
+
+
+def test_config_can_select_routerai_without_changing_input_boundary() -> None:
+    payload = _payload()
+    payload["config"] = {
+        "source_path": "config.yaml",
+        "format": "yaml",
+        "raw_text": "llm:\n  provider: routerai\n",
+        "parsed_data": {
+            "llm": {
+                "provider": "routerai",
+                "model": "openai/gpt-5.4-mini",
+                "temperature": 0.1,
+                "api_key_file": "LLM_apikey/routerai_key.txt",
+                "api_base_url": "https://routerai.ru/api/v1",
+            }
+        },
+    }
+
+    config = LLMConfig.from_input_payload(payload)
+    provider = create_provider(config)
+
+    assert config.provider == "routerai"
+    assert config.model == "openai/gpt-5.4-mini"
+    assert config.temperature == 0.1
+    assert config.api_base_url == "https://routerai.ru/api/v1"
+    assert isinstance(provider, RouterAIProvider)
+
+
+def test_config_can_select_openai_without_changing_input_boundary() -> None:
+    payload = _payload()
+    payload["config"] = {
+        "source_path": "config.yaml",
+        "format": "yaml",
+        "raw_text": "llm:\n  provider: openai\n",
+        "parsed_data": {
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-5.4-mini",
+                "temperature": 0.1,
+                "api_key_file": "LLM_apikey/openai-key.txt",
+                "api_base_url": "https://api.openai.com/v1",
+            }
+        },
+    }
+
+    config = LLMConfig.from_input_payload(payload)
+    provider = create_provider(config)
+
+    assert config.provider == "openai"
+    assert config.model == "gpt-5.4-mini"
+    assert config.temperature == 0.1
+    assert config.api_base_url == "https://api.openai.com/v1"
+    assert isinstance(provider, OpenAIProvider)
 
 
 def test_config_uses_top_level_output_language_as_llm_fallback() -> None:
@@ -358,6 +622,194 @@ def test_openrouter_generate_posts_prompt_and_extracts_text(monkeypatch: pytest.
     assert response.metadata == {"provider": "openrouter", "mode": "api", "model": "test-model"}
 
 
+def test_openai_key_prefers_environment_and_is_not_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key_file = tmp_path / "openai-key.txt"
+    key_file.write_text("file-key", encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+
+    config = LLMConfig(provider="openai", api_key_file=key_file)
+
+    assert config.load_openai_api_key() == "env-key"
+    provider = OpenAIProvider(config)
+    assert "env-key" not in repr(provider)
+
+
+def test_openai_missing_key_error_does_not_expose_secret_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("COURSE_CONNECTOR_LLM_API_KEY", raising=False)
+    config = LLMConfig(provider="openai", api_key_file=tmp_path / "missing-openai-key.txt")
+
+    with pytest.raises(LLMConfigurationError) as exc_info:
+        config.load_openai_api_key()
+
+    assert "missing-openai-key.txt" not in str(exc_info.value)
+    assert "OPENAI_API_KEY" in str(exc_info.value)
+
+
+def test_openai_generate_posts_prompt_and_extracts_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"output_text": "provider text"}).encode("utf-8")
+
+    def fake_urlopen(request: object, timeout: float) -> FakeResponse:
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(openai_module.urllib.request, "urlopen", fake_urlopen)
+
+    response = OpenAIProvider(
+        LLMConfig(
+            provider="openai",
+            model="gpt-5.4-mini",
+            timeout_seconds=12,
+            api_base_url="https://api.openai.com/v1",
+        )
+    ).generate("hello prompt")
+
+    request = captured["request"]
+    payload = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+    assert request.full_url == "https://api.openai.com/v1/responses"  # type: ignore[attr-defined]
+    assert payload == {"model": "gpt-5.4-mini", "input": "hello prompt"}
+    assert request.get_header("Authorization") == "Bearer test-key"  # type: ignore[attr-defined]
+    assert captured["timeout"] == 12
+    assert response.text == "provider text"
+    assert response.metadata == {"provider": "openai", "mode": "api", "model": "gpt-5.4-mini"}
+
+
+def test_openai_extract_text_reads_nested_responses_content() -> None:
+    response_data = {
+        "output": [
+            {
+                "content": [
+                    {"type": "output_text", "text": "first "},
+                    {"type": "output_text", "text": "second"},
+                ]
+            }
+        ]
+    }
+
+    assert openai_module._extract_text(response_data) == "first second"
+
+
+def test_openai_extract_text_rejects_malformed_response() -> None:
+    with pytest.raises(RuntimeError, match="did not include text output"):
+        openai_module._extract_text({"output": []})
+
+
+def test_routerai_key_prefers_environment_and_is_not_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key_file = tmp_path / "routerai-key.txt"
+    key_file.write_text("file-key", encoding="utf-8")
+    monkeypatch.setenv("ROUTERAI_API_KEY", "env-key")
+
+    config = LLMConfig(provider="routerai", api_key_file=key_file)
+
+    assert config.load_routerai_api_key() == "env-key"
+    provider = RouterAIProvider(config)
+    assert "env-key" not in repr(provider)
+
+
+def test_routerai_missing_key_error_does_not_expose_secret_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ROUTERAI_API_KEY", raising=False)
+    monkeypatch.delenv("COURSE_CONNECTOR_LLM_API_KEY", raising=False)
+    config = LLMConfig(provider="routerai", api_key_file=tmp_path / "missing-routerai-key.txt")
+
+    with pytest.raises(LLMConfigurationError) as exc_info:
+        config.load_routerai_api_key()
+
+    assert "missing-routerai-key.txt" not in str(exc_info.value)
+    assert "ROUTERAI_API_KEY" in str(exc_info.value)
+
+
+def test_routerai_generate_posts_prompt_and_extracts_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"choices": [{"message": {"content": "provider text"}}]}).encode("utf-8")
+
+    def fake_urlopen(request: object, timeout: float) -> FakeResponse:
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("ROUTERAI_API_KEY", "test-key")
+    monkeypatch.setattr(routerai_module.urllib.request, "urlopen", fake_urlopen)
+
+    response = RouterAIProvider(
+        LLMConfig(
+            provider="routerai",
+            model="openai/gpt-5.4-mini",
+            timeout_seconds=12,
+            api_base_url="https://routerai.ru/api/v1",
+        )
+    ).generate("hello prompt")
+
+    request = captured["request"]
+    payload = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+    assert request.full_url == "https://routerai.ru/api/v1/chat/completions"  # type: ignore[attr-defined]
+    assert payload["model"] == "openai/gpt-5.4-mini"
+    assert payload["messages"][0]["content"] == "hello prompt"
+    assert request.get_header("Authorization") == "Bearer test-key"  # type: ignore[attr-defined]
+    assert captured["timeout"] == 12
+    assert response.text == "provider text"
+    assert response.metadata == {"provider": "routerai", "mode": "api", "model": "openai/gpt-5.4-mini"}
+
+
+def test_routerai_default_url_is_used_when_openrouter_default_is_still_on_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"choices": [{"message": {"content": "provider text"}}]}).encode("utf-8")
+
+    def fake_urlopen(request: object, timeout: float) -> FakeResponse:
+        captured["url"] = request.full_url  # type: ignore[attr-defined]
+        return FakeResponse()
+
+    monkeypatch.setenv("ROUTERAI_API_KEY", "test-key")
+    monkeypatch.setattr(routerai_module.urllib.request, "urlopen", fake_urlopen)
+
+    RouterAIProvider(LLMConfig(provider="routerai")).generate("hello prompt")
+
+    assert captured["url"] == "https://routerai.ru/api/v1/chat/completions"
+
+
 @pytest.mark.parametrize(
     ("response_data", "message"),
     [
@@ -475,4 +927,20 @@ def _payload() -> dict[str, object]:
         },
         "config": None,
         "warnings": [],
+    }
+
+
+def _batch(batch_id: str) -> dict[str, object]:
+    return {
+        "batch_id": batch_id,
+        "batch_type": "skill",
+        "skill_ids": ["skill_a"],
+        "skill_dictionary_subset": [{"id": "skill_a", "title": "Skill A", "aliases": []}],
+        "course_profiles": {},
+        "course_a_chunks": [{"chunk_id": "chunk_a", "text": "A", "source_role": "course_a"}],
+        "course_b_chunks": [{"chunk_id": "chunk_b", "text": "B", "source_role": "course_b"}],
+        "assessment_chunks": [],
+        "course_a_chunk_ids": ["chunk_a"],
+        "course_b_chunk_ids": ["chunk_b"],
+        "assessment_chunk_ids": [],
     }

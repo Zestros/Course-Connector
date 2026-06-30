@@ -23,16 +23,17 @@ def build_prompt_context(input_payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _entry_context(entry: Any, max_chars: int = 1200) -> dict[str, Any]:
+def _entry_context(entry: Any, max_chars: int | None = None) -> dict[str, Any]:
     if entry is None:
         return {"source_path": None, "format": None, "text": ""}
     text = entry.get("normalized_text") or entry.get("raw_text") or ""
     if not text and "parsed_data" in entry:
         text = json.dumps(entry["parsed_data"], ensure_ascii=False, indent=2)
+    text_value = str(text)
     return {
         "source_path": entry.get("source_path"),
         "format": entry.get("format"),
-        "text": _clip(str(text), max_chars=max_chars),
+        "text": _clip(text_value, max_chars=max_chars) if max_chars is not None else text_value,
     }
 
 
@@ -54,7 +55,11 @@ def _clip(text: str, max_chars: int) -> str:
 def _has_selected_evidence(preprocessing: dict[str, Any]) -> bool:
     if not preprocessing.get("enabled"):
         return False
-    return bool(preprocessing.get("selected_chunks") or preprocessing.get("retrieved_pairs"))
+    return bool(
+        preprocessing.get("selected_chunks")
+        or preprocessing.get("retrieved_pairs")
+        or preprocessing.get("skill_batches")
+    )
 
 
 def _selected_chunks_context(preprocessing: dict[str, Any]) -> dict[str, Any]:

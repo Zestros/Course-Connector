@@ -33,6 +33,12 @@ def normalize_relations(relations: list[Any], warnings: list[str]) -> list[dict[
         }
         if isinstance(relation.get("evidence_refs"), list):
             item["evidence_refs"] = relation["evidence_refs"]
+        if isinstance(relation.get("skill_ids"), list):
+            item["skill_ids"] = [str(skill_id) for skill_id in relation["skill_ids"]]
+        if relation.get("batch_id"):
+            item["batch_id"] = str(relation["batch_id"])
+        if isinstance(relation.get("source_batch_ids"), list):
+            item["source_batch_ids"] = [str(batch_id) for batch_id in relation["source_batch_ids"]]
         normalized.append(item)
     return normalized
 

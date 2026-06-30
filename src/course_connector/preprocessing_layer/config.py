@@ -48,19 +48,32 @@ class TokenBudgetConfig:
 
 
 @dataclass(frozen=True)
+class BatchConfig:
+    max_skills_per_batch: int = 1
+    max_chunks_per_skill: int = 6
+    max_assessment_chunks_per_skill: int = 4
+    max_batch_input_tokens: int | None = 9000
+    include_course_profile: bool = True
+    merge_strategy: str = "local_dedup"
+
+
+@dataclass(frozen=True)
 class PreprocessingConfig:
     enabled: bool = False
+    analysis_mode: str = "retrieval_single_shot"
     write_intermediate_outputs: bool = True
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
     token_budget: TokenBudgetConfig = field(default_factory=TokenBudgetConfig)
+    batch: BatchConfig = field(default_factory=BatchConfig)
 
     @classmethod
     def from_input_payload(cls, input_payload: dict[str, Any]) -> "PreprocessingConfig":
         """Build preprocessing config from the optional parsed config input."""
         data = _preprocessing_section(input_payload)
         chunking_data = _nested(data, "chunking")
+        batch_data = _nested(data, "batch")
         token_budget_data = _nested(data, "token_budget")
         max_input_tokens = _positive_int(
             token_budget_data.get("max_input_tokens"),
@@ -79,6 +92,7 @@ class PreprocessingConfig:
             )
         return cls(
             enabled=_bool_setting(data.get("enabled"), cls.enabled),
+            analysis_mode=_analysis_mode(data.get("analysis_mode") or cls.analysis_mode),
             write_intermediate_outputs=_bool_setting(
                 data.get("write_intermediate_outputs"),
                 cls.write_intermediate_outputs,
@@ -142,6 +156,32 @@ class PreprocessingConfig:
                 enabled=_bool_setting(token_budget_data.get("enabled"), TokenBudgetConfig.enabled),
                 max_input_tokens=max_input_tokens,
                 reserve_output_tokens=reserve_output_tokens,
+            ),
+            batch=BatchConfig(
+                max_skills_per_batch=_positive_int(
+                    batch_data.get("max_skills_per_batch"),
+                    BatchConfig.max_skills_per_batch,
+                    "preprocessing.batch.max_skills_per_batch",
+                ),
+                max_chunks_per_skill=_positive_int(
+                    batch_data.get("max_chunks_per_skill"),
+                    BatchConfig.max_chunks_per_skill,
+                    "preprocessing.batch.max_chunks_per_skill",
+                ),
+                max_assessment_chunks_per_skill=_positive_int(
+                    batch_data.get("max_assessment_chunks_per_skill"),
+                    BatchConfig.max_assessment_chunks_per_skill,
+                    "preprocessing.batch.max_assessment_chunks_per_skill",
+                ),
+                max_batch_input_tokens=_optional_positive_int(
+                    batch_data.get("max_batch_input_tokens"),
+                    "preprocessing.batch.max_batch_input_tokens",
+                ),
+                include_course_profile=_bool_setting(
+                    batch_data.get("include_course_profile"),
+                    BatchConfig.include_course_profile,
+                ),
+                merge_strategy=_merge_strategy(batch_data.get("merge_strategy") or BatchConfig.merge_strategy),
             ),
         )
 
@@ -210,8 +250,22 @@ def _chunk_sizing_mode(value: Any) -> str:
     return mode
 
 
+def _analysis_mode(value: Any) -> str:
+    mode = str(value).strip().lower()
+    if mode not in {"full_input", "retrieval_single_shot", "smart_batch"}:
+        raise PreprocessingConfigurationError(f"Unsupported preprocessing analysis mode `{value}`.")
+    return mode
+
+
 def _retrieval_mode(value: Any) -> str:
     mode = str(value).strip().lower()
     if mode not in {"none", "keyword", "local_embeddings"}:
         raise PreprocessingConfigurationError(f"Unsupported retrieval mode `{value}`.")
     return mode
+
+
+def _merge_strategy(value: Any) -> str:
+    strategy = str(value).strip().lower()
+    if strategy not in {"local_dedup", "llm_synthesis"}:
+        raise PreprocessingConfigurationError(f"Unsupported batch merge strategy `{value}`.")
+    return strategy

@@ -5,16 +5,18 @@ relation_types:
   - probable_duplication
   - probable_gap
 llm:
-  provider: openrouter
-  model: openrouter/free
+  provider: openai
+  model: gpt-5.4-mini
   temperature: 0.0
-  timeout_seconds: 60
+  timeout_seconds: 180
   debug: false
   output_language: ru
-  prompt_template: default_analysis_prompt.md
-  api_key_file: LLM_apikey/key.txt
+  prompt_template: strict_evidence_analysis_prompt.md
+  api_key_file: LLM_apikey/openai-key.txt
+  api_base_url: https://api.openai.com/v1
 preprocessing:
-  enabled: false
+  enabled: true
+  analysis_mode: smart_batch
   write_intermediate_outputs: true
   chunking:
     enabled: true
@@ -30,6 +32,13 @@ preprocessing:
     mode: keyword
     top_k: 8
     fallback_mode: keyword
+  batch:
+    max_skills_per_batch: 1
+    max_chunks_per_skill: 6
+    max_assessment_chunks_per_skill: 4
+    max_batch_input_tokens: 9000
+    include_course_profile: true
+    merge_strategy: local_dedup
   embeddings:
     enabled: false
     provider: local_sentence_transformer

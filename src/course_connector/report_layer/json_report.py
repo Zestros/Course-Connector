@@ -70,6 +70,7 @@ def _preprocessing_summary(
     return {
         "enabled": bool(analysis_context.get("enabled")),
         "mode": analysis_context.get("mode", "disabled"),
+        "analysis_mode": analysis_context.get("analysis_mode", analysis_context.get("mode", "disabled")),
         "metrics": analysis_context.get("metrics", {}),
         "warnings": analysis_context.get("warnings", []),
         "outputs": intermediate_outputs,

@@ -133,6 +133,22 @@ def test_load_input_payload_rejects_unknown_course_skill_refs(tmp_path: Path) ->
     assert "unknown skill ids: missing_skill" in str(exc_info.value)
 
 
+def test_big_course_example_passes_input_preflight_validation() -> None:
+    example_dir = PROJECT_ROOT / "data" / "examples" / "big_course"
+
+    payload = load_input_payload(
+        course_a=example_dir / "course_git.md",
+        course_b=example_dir / "course_github.md",
+        skill_dictionary=example_dir / "skill_dictionary.yaml",
+        assessments=example_dir / "assessments.md",
+    )
+
+    assert payload["course_a"]["format"] == "markdown"
+    assert payload["course_b"]["format"] == "markdown"
+    assert "git_repository_model" in payload["course_a"]["normalized_text"]
+    assert "github_pull_request_workflow" in payload["course_b"]["normalized_text"]
+
+
 def _write(path: Path, content: str) -> Path:
     path.write_text(content, encoding="utf-8")
     return path
