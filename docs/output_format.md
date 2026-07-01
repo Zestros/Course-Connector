@@ -1,109 +1,90 @@
 # Output Format
 
-Course Connector writes a human-readable Markdown report and a machine-readable JSON result into the selected output directory.
+Course Connector пишет результат в папку `--output-dir`.
 
-## Files
+## Главные файлы
 
-Required outputs:
+- `report.md` - отчет для методиста или преподавателя.
+- `result.json` - машинно-читаемый результат.
 
-- `report.md`
-- `result.json`
+## Intermediate-файлы
 
-Optional preprocessing outputs when preprocessing and intermediate writes are enabled:
+При включенном preprocessing могут появиться:
 
-- `chunks_course_a.json`
-- `chunks_course_b.json`
-- `retrieved_pairs.json`
-- `preprocessing_summary.json`
+- `chunks_course_a.json`;
+- `chunks_course_b.json`;
+- `selected_chunks.json`;
+- `retrieved_pairs.json`;
+- `course_profiles.json`;
+- `skill_batches.json`;
+- `batch_results.json`;
+- `merged_findings.json`;
+- `preprocessing_summary.json`.
 
 ## JSON Result
 
-Top-level shape:
+Основная структура:
 
 ```json
 {
   "status": "completed",
-  "run_id": "20260627T080545Z",
-  "generated_at": "2026-06-27T08:05:45+00:00",
+  "run_id": "20260701T000000Z",
+  "generated_at": "2026-07-01T00:00:00+00:00",
   "pipeline_stage": "mvp_llm_analysis_layer",
-  "summary": "Mock analysis found candidate relations between the two course inputs.",
+  "summary": "Analysis summary.",
   "relations": [],
   "warnings": [],
   "provider": "mock",
-  "provider_mode": "mock",
+  "provider_mode": "batch_api",
   "inputs": {},
-  "outputs": {}
+  "outputs": {},
+  "preprocessing": {}
 }
 ```
 
-Relation shape:
+Relation:
 
 ```json
 {
-  "type": "useful_repetition",
-  "course_a_fragment": "Course A introduces a skill that appears again in Course B.",
-  "course_b_fragment": "Course B reuses the skill in a more applied context.",
-  "explanation": "The repeated topic can reinforce learning when coordinated between courses.",
-  "confidence": 0.72,
-  "evidence_refs": []
+  "type": "probable_gap",
+  "course_a_fragment": "Course A prepares only Git basics.",
+  "course_b_fragment": "Course B expects pull request workflow.",
+  "explanation": "Course B requires a skill that is not explicitly trained in Course A.",
+  "confidence": 0.86,
+  "skill_ids": ["github_pull_request_workflow"],
+  "evidence_refs": ["course_a_section_002", "course_b_section_012"]
 }
 ```
 
-Supported relation types:
+Поддерживаемые типы:
 
-- `useful_repetition`
-- `probable_duplication`
-- `probable_gap`
+- `useful_repetition`;
+- `probable_duplication`;
+- `probable_gap`.
 
-Provider error shape:
+## Provider Error
+
+Если API недоступен или вернул ошибку, pipeline пишет стабильный JSON:
 
 ```json
 {
   "status": "provider_error",
-  "summary": "LLM provider did not return a usable response. See warnings for details.",
   "relations": [],
-  "provider": "openrouter",
   "provider_mode": "error",
-  "warnings": [
-    "LLM provider `openrouter` failed: OpenRouter request failed with HTTP 429."
-  ]
+  "warnings": ["LLM provider `openai` failed: ..."]
 }
 ```
 
 ## Markdown Report
 
-The Markdown report includes:
+Отчет содержит:
 
 - run metadata;
-- analysis summary;
-- relations grouped by type;
-- confidence values;
-- Course A and Course B fragments;
-- evidence references when available;
-- preprocessing metrics when enabled;
+- summary;
+- relation candidates по типам;
+- confidence;
+- фрагменты Course A и Course B;
+- evidence refs;
+- preprocessing metrics;
 - warnings;
-- source file list.
-
-## Evidence References
-
-Evidence references point to source files and locators. Current locator kinds:
-
-- `line_range` for Markdown sections;
-- `object_path` for structured YAML objects;
-- `row_index` for CSV rows;
-- `coarse_file` when no precise locator is available.
-
-Example:
-
-```json
-{
-  "chunk_id": "assessments_row_003",
-  "source_role": "assessments",
-  "source_path": "data/examples/assessments.csv",
-  "source_type": "row",
-  "locator": {
-    "kind": "row_index",
-    "row_index": 3
-  }
-}
-```
+- список входных файлов.

@@ -1,100 +1,108 @@
 # Field Trial
 
-The field trial checks whether Course Connector helps a teacher, methodologist, or program lead discuss course alignment using concrete evidence.
+Field trial проверяет, помогает ли Course Connector быстрее обсуждать связь двух курсов на основе evidence.
 
-## Goal
+## Цель
 
-Run Course Connector on two related courses and verify that the report makes repetitions, duplications, and gaps visible enough for human review.
+Проверить два связанных курса и понять:
 
-## Participants
+- где есть полезное повторение;
+- где есть вероятное дублирование;
+- где есть пробел между подготовкой и проверкой навыка.
 
-- One methodologist or program lead.
-- Two teachers responsible for the compared courses.
-- One developer or operator who can run the CLI and collect feedback.
+## Участники
 
-## Materials
+- Методист или руководитель программы.
+- Два преподавателя сравниваемых курсов.
+- Оператор, который запускает CLI и собирает обратную связь.
 
-- Course A description.
-- Course B description.
-- Shared skill dictionary.
-- Assessment descriptions or assessment CSV.
-- Config file.
-- Generated `report.md`.
-- Generated `result.json`.
+## Материалы
 
-## Preparation
+- Course A.
+- Course B.
+- Skill dictionary.
+- Assessments.
+- Config.
+- `report.md`.
+- `result.json`.
 
-Each course should be described with at least:
+## Подготовка
 
-- title;
-- short description or topics;
-- learning outcomes;
-- skills or skill references;
-- assessment evidence.
+Перед запуском нужно проверить, что:
 
-The skill dictionary should use stable IDs. The same skill IDs should appear in course modules, learning outcomes, or assessment rows whenever possible.
+- в курсах есть title, description, topics, learning outcomes;
+- skill ids совпадают со словарем;
+- assessments явно указывают проверяемые навыки;
+- приватные данные удалены или разрешены к обработке.
 
-## Procedure
+## Процедура
 
-1. Prepare the input files in the agreed format.
-2. Run Course Connector locally.
-3. Open `report.md`.
-4. Review each relation candidate.
-5. Mark each candidate as:
-   - confirmed;
-   - rejected;
-   - requires discussion.
-6. Record which source fragments support or weaken the candidate.
-7. Decide whether the courses need changes.
+1. Подготовить входные файлы.
+2. Запустить Course Connector.
+3. Открыть `report.md`.
+4. Проверить каждый relation candidate.
+5. Для каждого кандидата поставить статус: `confirmed`, `rejected` или `requires_discussion`.
+6. Записать, какие evidence refs подтверждают или ослабляют вывод.
+7. Решить, нужны ли изменения в курсах.
 
 ## Simulation Trial
 
-Before a real field trial, run the demonstration scenario:
+Локальная проверка без API:
 
 ```bash
-course-connector run \
-  --course-a data/examples/course_a/course.yaml \
-  --course-b data/examples/course_b/course.yaml \
-  --skill-dictionary data/examples/skill_dictionary.yaml \
-  --assessments data/examples/assessments.csv \
-  --config data/examples/config.yaml \
-  --output-dir outputs/demo
+make demo
 ```
 
-Expected simulation result:
+Docker-проверка без API:
 
-- at least one `useful_repetition` candidate;
-- at least one `probable_duplication` candidate;
-- at least one `probable_gap` candidate;
-- a Markdown report;
-- a JSON result;
-- source file references.
+```bash
+make docker-demo
+```
 
-## Metrics
+Ожидаемый результат:
 
-Quantitative:
+- запуск завершается без ошибки;
+- создаются `outputs/demo/report.md` и `outputs/demo/result.json`;
+- `result.json` содержит непустой список `relations`;
+- входные файлы указывают на `data/examples/big_course`.
 
-- number of relation candidates;
-- number of confirmed candidates;
-- number of rejected candidates;
-- number of candidates requiring discussion;
-- number of useful repetitions;
-- number of probable duplications;
-- number of probable gaps;
-- time from prepared files to report.
+## Real API Trial
 
-Qualitative:
+Проверка через OpenAI API:
 
-- whether the report is understandable;
-- whether the evidence is inspectable;
-- whether the relation labels are too strong or appropriately cautious;
-- whether the report leads to a concrete course discussion.
+```bash
+make docker-api OPENAI_API_KEY="sk-..."
+```
 
-## Acceptance Criteria
+Результат:
 
-The module is ready for limited field use when:
+```text
+outputs/big_course_api/report.md
+outputs/big_course_api/result.json
+```
 
-- the local run completes without external LMS dependencies;
-- the report contains at least three relation types in the simulation;
-- each candidate can be traced back to input files or evidence references;
-- reviewers can confirm, reject, or discuss candidates without rewriting the whole report.
+## Метрики
+
+Количественные:
+
+- число relation candidates;
+- число confirmed;
+- число rejected;
+- число requires_discussion;
+- время от подготовленных файлов до отчета.
+
+Качественные:
+
+- понятен ли отчет преподавателям;
+- можно ли проверить вывод по evidence refs;
+- не звучат ли формулировки слишком категорично;
+- привел ли отчет к конкретному решению по курсам.
+
+## Критерии успеха
+
+Field trial успешен, если:
+
+- отчет можно обсудить без разработчика;
+- каждый важный candidate проверяется по исходным фрагментам;
+- преподаватели находят хотя бы один полезный вывод или подтверждают, что явных проблем нет;
+- результат не требует ручного переписывания всего отчета.
