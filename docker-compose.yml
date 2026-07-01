@@ -6,16 +6,41 @@ services:
       - course-connector
       - run
       - --course-a
-      - data/examples/course_a/course.yaml
+      - data/examples/big_course/course_git.md
       - --course-b
-      - data/examples/course_b/course.yaml
+      - data/examples/big_course/course_github.md
       - --skill-dictionary
-      - data/examples/skill_dictionary.yaml
+      - data/examples/big_course/skill_dictionary.yaml
       - --assessments
-      - data/examples/assessments.csv
+      - data/examples/big_course/assessments.md
       - --config
-      - data/examples/config.yaml
+      - data/examples/big_course/config.yaml
       - --output-dir
       - outputs/demo
+    volumes:
+      - ./outputs:/app/outputs
+
+  course-connector-api:
+    build: .
+    image: course-connector:local
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+    command:
+      - course-connector
+      - run
+      - --course-a
+      - data/examples/big_course/course_git.md
+      - --course-b
+      - data/examples/big_course/course_github.md
+      - --skill-dictionary
+      - data/examples/big_course/skill_dictionary.yaml
+      - --assessments
+      - data/examples/big_course/assessments.md
+      - --config
+      - configs/default.yaml
+      - --output-dir
+      - outputs/big_course_api
     volumes:
       - ./outputs:/app/outputs
