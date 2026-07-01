@@ -40,7 +40,7 @@ def test_markdown_report_prints_human_readable_evidence_refs() -> None:
         {
             "chunk_id": "course_a_assessment_02",
             "source_role": "course_a",
-            "source_path": "data/examples/course_a/course.yaml",
+            "source_path": "data/examples/big_course/course_git.md",
             "source_type": "assessment",
             "locator": {
                 "kind": "object_path",
@@ -50,7 +50,7 @@ def test_markdown_report_prints_human_readable_evidence_refs() -> None:
         {
             "chunk_id": "assessments_row_003",
             "source_role": "assessments",
-            "source_path": "data/examples/assessments.csv",
+            "source_path": "data/examples/big_course/assessments.md",
             "source_type": "row",
             "locator": {
                 "kind": "row_index",
@@ -67,8 +67,8 @@ def test_markdown_report_prints_human_readable_evidence_refs() -> None:
     )
 
     assert "  - Evidence:" in report
-    assert "`course_a` `assessment` `course_a_assessment_02`: `data/examples/course_a/course.yaml` -> `assessments[1]`" in report
-    assert "`assessments` `row` `assessments_row_003`: `data/examples/assessments.csv` -> `row 3`" in report
+    assert "`course_a` `assessment` `course_a_assessment_02`: `data/examples/big_course/course_git.md` -> `assessments[1]`" in report
+    assert "`assessments` `row` `assessments_row_003`: `data/examples/big_course/assessments.md` -> `row 3`" in report
 
 
 def test_markdown_report_handles_string_evidence_refs() -> None:
