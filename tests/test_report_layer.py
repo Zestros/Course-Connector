@@ -85,6 +85,54 @@ def test_markdown_report_handles_string_evidence_refs() -> None:
     assert "    - `retrieved_001`" in report
 
 
+def test_markdown_report_expands_evidence_refs_with_chunk_text() -> None:
+    analysis = _analysis()
+    analysis["relations"][0]["evidence_refs"] = [
+        "course_b_topic_01",
+        {
+            "chunk_id": "course_a_module_01",
+            "source_role": "course_a",
+            "source_path": "course_a.yaml",
+            "source_type": "module",
+            "locator": {"kind": "object_path", "object_path": "modules[0]"},
+        },
+    ]
+
+    report = render_markdown_report(
+        _payload(),
+        analysis,
+        analysis_context={
+            "enabled": True,
+            "mode": "smart_batch",
+            "analysis_mode": "smart_batch",
+            "chunks": {
+                "course_a": [
+                    {
+                        "chunk_id": "course_a_module_01",
+                        "text": "Python basics module text.",
+                    }
+                ],
+                "course_b": [
+                    {
+                        "chunk_id": "course_b_topic_01",
+                        "text": "CLI tools",
+                    }
+                ],
+            },
+            "metrics": {},
+            "warnings": [],
+        },
+        run_id="run_001",
+        generated_at="2026-06-27T00:00:00+00:00",
+    )
+
+    assert "    - `course_b_topic_01`: CLI tools" in report
+    assert (
+        "    - `course_a` `module` `course_a_module_01`: `course_a.yaml` -> `modules[0]`: "
+        "Python basics module text."
+    ) in report
+
+
 def test_json_result_contains_relations_sources_and_run_metadata(tmp_path: Path) -> None:
     output_paths = {
         "report_md": tmp_path / "report.md",

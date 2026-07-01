@@ -38,9 +38,14 @@ def render_markdown_report(
     ]
 
     relations = list(analysis.get("relations") or [])
+    chunk_texts = _chunk_texts(analysis_context)
     for relation_type, title in RELATION_SECTIONS:
         lines.extend([f"## {title}", ""])
-        _append_relations(lines, [relation for relation in relations if relation.get("type") == relation_type])
+        _append_relations(
+            lines,
+            [relation for relation in relations if relation.get("type") == relation_type],
+            chunk_texts,
+        )
         lines.append("")
 
     other_relations = [
@@ -50,7 +55,7 @@ def render_markdown_report(
     ]
     if other_relations:
         lines.extend(["## Other Relations", ""])
-        _append_relations(lines, other_relations)
+        _append_relations(lines, other_relations, chunk_texts)
         lines.append("")
 
     if analysis_context and analysis_context.get("enabled"):
@@ -95,7 +100,11 @@ def render_markdown_report(
     return "\n".join(lines)
 
 
-def _append_relations(lines: list[str], relations: list[dict[str, Any]]) -> None:
+def _append_relations(
+    lines: list[str],
+    relations: list[dict[str, Any]],
+    chunk_texts: dict[str, str],
+) -> None:
     if not relations:
         lines.append("- None")
         return
@@ -112,7 +121,7 @@ def _append_relations(lines: list[str], relations: list[dict[str, Any]]) -> None
         if relation.get("evidence_refs"):
             lines.append("  - Evidence:")
             for evidence_ref in relation["evidence_refs"]:
-                lines.append(f"    - {_format_evidence_ref(evidence_ref)}")
+                lines.append(f"    - {_format_evidence_ref(evidence_ref, chunk_texts)}")
 
 
 def _format_confidence(value: Any) -> str:
@@ -122,15 +131,51 @@ def _format_confidence(value: Any) -> str:
         return "unknown"
 
 
-def _format_evidence_ref(evidence_ref: Any) -> str:
+def _format_evidence_ref(evidence_ref: Any, chunk_texts: dict[str, str] | None = None) -> str:
+    chunk_texts = chunk_texts or {}
     if not isinstance(evidence_ref, dict):
-        return f"`{str(evidence_ref)}`"
+        chunk_id = str(evidence_ref)
+        return _format_evidence_with_chunk_text(f"`{chunk_id}`", chunk_id, chunk_texts)
     role = evidence_ref.get("source_role") or "unknown"
     source_type = evidence_ref.get("source_type") or "source"
     source_path = evidence_ref.get("source_path") or "unknown source"
     chunk_id = evidence_ref.get("chunk_id") or "unknown chunk"
     locator = _format_locator(evidence_ref.get("locator"))
-    return f"`{role}` `{source_type}` `{chunk_id}`: `{source_path}` -> `{locator}`"
+    formatted = f"`{role}` `{source_type}` `{chunk_id}`: `{source_path}` -> `{locator}`"
+    return _format_evidence_with_chunk_text(formatted, str(chunk_id), chunk_texts)
+
+
+def _format_evidence_with_chunk_text(formatted_ref: str, chunk_id: str, chunk_texts: dict[str, str]) -> str:
+    chunk_text = chunk_texts.get(chunk_id)
+    if not chunk_text:
+        return formatted_ref
+    return f"{formatted_ref}: {chunk_text}"
+
+
+def _chunk_texts(analysis_context: dict[str, Any] | None) -> dict[str, str]:
+    if not analysis_context:
+        return {}
+    chunks = analysis_context.get("chunks")
+    if not isinstance(chunks, dict):
+        return {}
+    result: dict[str, str] = {}
+    for chunk_list in chunks.values():
+        if not isinstance(chunk_list, list):
+            continue
+        for chunk in chunk_list:
+            if not isinstance(chunk, dict):
+                continue
+            chunk_id = str(chunk.get("chunk_id") or "").strip()
+            text = _normalize_chunk_text(chunk.get("text"))
+            if chunk_id and text:
+                result[chunk_id] = text
+    return result
+
+
+def _normalize_chunk_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).split())
 
 
 def _format_locator(locator: Any) -> str:
