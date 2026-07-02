@@ -8,6 +8,8 @@ Course Connector сравнивает два учебных курса и пок
 
 Результат сохраняется как Markdown-отчет и JSON.
 
+Архитектура проекта в диаграммах Mermaid: [docs/uml_diagrams.md](docs/uml_diagrams.md).
+
 ## Быстрый запуск
 
 ```bash
