@@ -1,84 +1,36 @@
 # Input Format
 
-Course Connector accepts file-based inputs. The CLI currently expects five paths: course A, course B, skill dictionary, assessment materials, and optional config.
+Course Connector работает с файлами. Основной запуск:
 
 ```bash
 course-connector run \
-  --course-a path/to/course_a.yaml \
-  --course-b path/to/course_b.yaml \
+  --course-a path/to/course_a.md \
+  --course-b path/to/course_b.md \
   --skill-dictionary path/to/skill_dictionary.yaml \
-  --assessments path/to/assessments.csv \
+  --assessments path/to/assessments.md \
   --config path/to/config.yaml \
-  --output-dir outputs/demo
+  --output-dir outputs/run
 ```
 
 ## Course Files
 
-Supported extensions:
+Поддерживаются:
 
-- `.md`
-- `.yaml`
-- `.yml`
+- `.md`;
+- `.yaml`;
+- `.yml`.
 
-Minimal YAML shape:
+Минимально курс должен содержать:
 
-```yaml
-id: course_a
-title: Основы анализа учебных данных
-description: Курс учит читать небольшие таблицы и готовить короткий отчет.
-topics:
-  - Python basics
-  - Data processing
-learning_outcomes:
-  - text: Читать простые наборы данных с помощью python_basics.
-    skills:
-      - python_basics
-competencies:
-  - python_basics
-modules:
-  - id: module_01
-    title: Python Basics
-    description: Introductory Python practice.
-    skills:
-      - python_basics
-assessments:
-  - id: assessment_01
-    title: CLI task
-    checked_skills:
-      - python_basics
-    evidence: Student submits a working CLI run log.
-```
+- title;
+- description;
+- topics;
+- learning outcomes;
+- competencies или skill ids;
+- assessments;
+- evidence.
 
-Structured YAML may also contain educational entities used by preprocessing:
-
-```yaml
-modules:
-  - id: module_01
-    title: Python Basics
-    description: Introductory Python practice.
-    skills:
-      - python_basics
-learning_outcomes:
-  - text: Use python_basics in small programs.
-assessments:
-  - id: assessment_01
-    title: CLI task
-    checked_skills:
-      - python_basics
-```
-
-Before preprocessing starts, both course files must pass input preflight validation. A course must include:
-
-- `title`;
-- `description`;
-- non-empty `topics`;
-- non-empty `learning_outcomes`;
-- competencies or skill links in modules, outcomes, or assessments;
-- non-empty `assessments`;
-- evidence, either as top-level `evidence` or assessment-level evidence fields;
-- at least one skill id that exists in the skill dictionary.
-
-Markdown course files are treated as text, but they still need a title heading and these sections:
+Markdown-курс должен иметь понятные разделы:
 
 ```markdown
 # Course title
@@ -102,71 +54,61 @@ Markdown course files are treated as text, but they still need a title heading a
 ...
 ```
 
-Headings are used as coarse sections for chunking when preprocessing is enabled.
+В `big_course` используются Markdown-файлы:
 
-For `preprocessing.analysis_mode: smart_batch`, explicit skill ids improve coverage. Put skill ids from `skill_dictionary` in competencies, learning outcomes, module descriptions, assessment descriptions, or evidence text when possible. If an assessment does not include an exact skill id, smart batch planning can match by skill aliases and assessment text, but uncertain matches are reported as warnings rather than treated as authoritative evidence.
+- `data/examples/big_course/course_git.md`;
+- `data/examples/big_course/course_github.md`.
 
 ## Skill Dictionary
 
-Supported extensions:
+Поддерживаются:
 
-- `.yaml`
-- `.yml`
-- `.json`
+- `.yaml`;
+- `.yml`;
+- `.json`.
 
-YAML example:
+Пример:
 
 ```yaml
 skills:
-  - id: python_basics
-    title: Python basics
-    description: Базовое чтение и обработка данных на Python.
+  - id: git_commit_quality
+    title: Commit quality
     aliases:
-      - Python basics
+      - commit message
+      - atomic commit
 ```
 
-The `id` field is the stable reference used by course chunks, assessment rows, retrieval, and reports.
+`id` должен быть стабильным. Эти id используются в курсах, заданиях, retrieval и отчете.
 
 ## Assessments
 
-Supported extensions:
+Поддерживаются:
 
-- `.md`
-- `.yaml`
-- `.yml`
-- `.csv`
+- `.md`;
+- `.yaml`;
+- `.yml`;
+- `.csv`.
 
-CSV example:
+В `big_course` задания лежат в:
 
-```csv
-course_id,assessment_id,title,skill_id,type
-course_a,a1,Мини-отчет по набору данных,data_processing,project
-course_b,b1,CLI-проверка входных файлов,file_validation,practical
+```text
+data/examples/big_course/assessments.md
 ```
 
-CSV rows become evidence chunks. The row number is preserved as a locator for review.
+Для smart batch полезно явно указывать skill ids в описании заданий.
 
 ## Config
 
-Supported extensions:
+Demo config:
 
-- `.yaml`
-- `.yml`
-
-Minimal config:
-
-```yaml
-output_language: ru
-include_summary: true
-llm:
-  provider: mock
-  output_language: ru
-preprocessing:
-  enabled: true
-  retrieval:
-    enabled: true
-    mode: keyword
-    top_k: 8
+```text
+data/examples/big_course/config.yaml
 ```
 
-The config can select `mock` for deterministic local runs or `openrouter` for real API analysis.
+Real API config:
+
+```text
+configs/default.yaml
+```
+
+Config выбирает provider, режим preprocessing, retrieval и token budget.

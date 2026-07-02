@@ -11,4 +11,4 @@ COPY Makefile module.yaml ./
 
 RUN pip install --no-cache-dir -e ".[dev]"
 
-CMD ["course-connector", "run", "--course-a", "data/examples/course_a/course.yaml", "--course-b", "data/examples/course_b/course.yaml", "--skill-dictionary", "data/examples/skill_dictionary.yaml", "--assessments", "data/examples/assessments.csv", "--config", "data/examples/config.yaml", "--output-dir", "outputs/demo"]
+CMD ["course-connector", "run", "--course-a", "data/examples/big_course/course_git.md", "--course-b", "data/examples/big_course/course_github.md", "--skill-dictionary", "data/examples/big_course/skill_dictionary.yaml", "--assessments", "data/examples/big_course/assessments.md", "--config", "data/examples/big_course/config.yaml", "--output-dir", "outputs/demo"]

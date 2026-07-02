@@ -1,54 +1,43 @@
 # MVP Scope
 
-Course Connector MVP compares two course descriptions through skills, learning outcomes, and assessment evidence. It is a teacher-side and integration-layer module: it prepares candidates for methodological review, but it does not change courses and does not make a final expert decision.
+Course Connector MVP сравнивает два курса через навыки, результаты обучения и проверочные задания. Модуль готовит кандидаты для методиста, но не меняет курсы автоматически.
 
-## Included
+## Входит в MVP
 
-- Load course A from Markdown, YAML, or YML.
-- Load course B from Markdown, YAML, or YML.
-- Load one shared skill dictionary from YAML, YML, or JSON.
-- Load assessment evidence from Markdown, YAML, YML, or CSV.
-- Load optional YAML configuration.
-- Prepare lightweight preprocessing context when enabled.
-- Build chunks for course material, skill dictionary entries, and assessment rows.
-- Retrieve candidate evidence pairs with keyword retrieval, or with local embeddings when the optional dependency and model are available.
-- Run an LLM provider in mock or OpenRouter mode.
-- Normalize relation candidates into the supported MVP relation types:
-  - `useful_repetition`
-  - `probable_duplication`
-  - `probable_gap`
-- Write a Markdown report.
-- Write a machine-readable JSON result.
-- Preserve source paths and evidence references when available.
+- Загрузка Course A из Markdown/YAML.
+- Загрузка Course B из Markdown/YAML.
+- Загрузка одного общего skill dictionary.
+- Загрузка assessment evidence из Markdown/YAML/CSV.
+- Проверка минимальной структуры входных файлов.
+- Chunking учебных материалов.
+- Keyword retrieval без ML-зависимостей.
+- Smart batch анализ больших материалов.
+- LLM providers: `mock`, `openai`, `openrouter`, `routerai`.
+- Relation types: `useful_repetition`, `probable_duplication`, `probable_gap`.
+- Markdown report.
+- JSON result.
+- Evidence refs на исходные фрагменты.
+- Docker-запуск demo и real API сценария.
 
-## Excluded
+## Не входит в MVP
 
-- Automatic course editing.
-- Full Moodle import/export support.
-- Continuous LMS synchronization.
+- Автоматическое редактирование курсов.
 - Web UI.
-- Multi-user approval workflows.
-- Full CASE implementation.
-- Persistent database.
-- Automatic publication to Redmine, OpenProject, Nextcloud, Evidence Locker, or Skill-matrix.
+- База данных.
+- Полная интеграция с Moodle.
+- Синхронизация с LMS.
+- Многопользовательское согласование.
+- Автоматическая публикация в Redmine, OpenProject, Nextcloud или Evidence Locker.
 
-## Acceptance Path
+## Критерий готовности
 
-The MVP is acceptable when a user can run the local CLI on two demonstration courses, get `report.md` and `result.json`, see at least the three MVP relation types, and inspect source references for the generated candidates.
+MVP считается рабочим, если:
 
-Recommended local checks:
+- `make demo` завершается успешно;
+- создаются `report.md` и `result.json`;
+- в отчете есть relation candidates;
+- у кандидатов есть объяснение и evidence refs, когда они доступны;
+- `make docker-demo` запускает тот же сценарий в контейнере;
+- `make docker-api OPENAI_API_KEY=...` запускает real API проверку.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -e .
-course-connector run \
-  --course-a data/examples/course_a/course.yaml \
-  --course-b data/examples/course_b/course.yaml \
-  --skill-dictionary data/examples/skill_dictionary.yaml \
-  --assessments data/examples/assessments.csv \
-  --config data/examples/config.yaml \
-  --output-dir outputs/demo
-```
-
-If project automation files are present, the same scenario should be available through `make demo`.
+Demo на `big_course` не обязан возвращать все три типа relation одновременно. Он проверяет работоспособность pipeline на большом учебном примере.
